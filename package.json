@@ -1,0 +1,15 @@
+{
+  "name": "cashbook",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cashbook \u2014 offline cash & business ledger",
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/share": "^6.0.3",
+    "@capacitor/filesystem": "^6.0.3",
+    "@capacitor/clipboard": "^6.0.2",
+    "@capgo/capacitor-native-biometric": "^6.0.4"
+  }
+}
