@@ -13,9 +13,12 @@ jobs:
 
       - name: Arrange files into the right folders
         run: |
-          mkdir -p www www/icons resources
-          for f in index.html sw.js manifest.webmanifest; do
+          mkdir -p www www/icons www/fonts resources
+          for f in index.html styles.css app.js sw.js manifest.webmanifest; do
             [ -f "$f" ] && mv -f "$f" www/ || true
+          done
+          for f in *.woff2; do
+            [ -f "$f" ] && mv -f "$f" www/fonts/ || true
           done
           [ -f icon.png ] && mv -f icon.png resources/ || true
           [ -f icon-1024.png ] && cp -f icon-1024.png resources/icon.png || true
