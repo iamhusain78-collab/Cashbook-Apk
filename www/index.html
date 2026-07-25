@@ -2,14 +2,18 @@
 <html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- interactive-widget=overlays-content: the soft keyboard must NOT resize the viewport.
+     Resizing forced a full-screen relayout on every keyboard show, which is what made the
+     entry form flicker on Android. Paired with Keyboard resize:"none" in capacitor.config.json
+     (this meta covers the PWA/browser; the plugin covers the APK's native WebView). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=overlays-content">
 <meta name="theme-color" id="meta-theme" content="#F6F2E8">
 <meta name="description" content="Offline cashbook — books, parties, cash & bank accounts. Your data never leaves this device.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>Cashbook</title>
-<link rel="stylesheet" href="styles.css?v=6.1.0">
+<link rel="stylesheet" href="styles.css?v=6.1.1">
 </head>
 <body>
 <div class="trial-banner" id="trial-banner"></div>
@@ -628,6 +632,6 @@
 <div class="snackbar" id="snackbar" role="status"><span class="sm" id="snack-msg"></span><button id="snack-undo">Undo</button></div>
 <div class="toast" id="toast" role="status"></div>
 
-<script src="app.js?v=6.1.0"></script>
+<script src="app.js?v=6.1.1"></script>
 </body>
 </html>

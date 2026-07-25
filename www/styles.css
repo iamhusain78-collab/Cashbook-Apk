@@ -1069,3 +1069,19 @@ html[data-theme="dark"] .toast,html[data-theme="dark"] .snackbar{background:#3A3
 .snackbar button{color:var(--accent)}
 /* empty-state doodles → muted indigo */
 .empty .doodle{color:var(--brand)}
+
+/* ---- P12 (v6.1.1): soft-keyboard compensation ----
+   The keyboard now OVERLAYS the app instead of resizing it (Keyboard resize:"none" +
+   interactive-widget=overlays-content) — that resize was the entry-form flicker. Nothing
+   shrinks any more, so the layout has to yield the space itself. initKeyboard() publishes
+   the keyboard height as --kb; these rules are the only consumers.
+   --kb is 0 everywhere the plugin is absent (web/PWA), so all of this is inert there. */
+:root{--kb:0px}
+/* bottom sheets sit on top of the keyboard instead of behind it */
+.sheet{bottom:var(--kb,0px)}
+/* full-page sheets keep their box; their scroll body gains the room instead */
+.sheet.fullpage{bottom:0}
+.sheet.fullpage .fpbody{padding-bottom:calc(28px + var(--kb,0px))}
+.sheet:not(.fullpage) .sheet-body{padding-bottom:calc(18px + var(--kb,0px))}
+/* the licence-key field lives near the bottom of a full-screen scroller */
+#paywall{padding-bottom:calc(40px + var(--kb,0px))}

@@ -1581,7 +1581,7 @@ function webDownloadBlob(blob,filename){
   document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
 }
 /* ============ in-app update check (direct APK channel only; Play updates itself) ============ */
-var APP_VERSION="6.1.0";
+var APP_VERSION="6.1.1";
 var UPDATE_URL="https://husainstudios.github.io/cashbook/version.json";
 function verCmp(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<3;i++){if((pa[i]||0)>(pb[i]||0))return 1;if((pa[i]||0)<(pb[i]||0))return -1;}return 0;}
 function checkForUpdate(){
@@ -3783,6 +3783,33 @@ function appGoBack(){
   if(v!=='view-home'){goTab('view-home');return true;}
   return false;
 }
+/* ---- Android soft keyboard ----
+   The Keyboard plugin is configured resize:"none" (capacitor.config.json), so opening the
+   keyboard no longer resizes the WebView. That resize was the entry-form flicker: Android
+   shrank the whole web view frame-by-frame over the keyboard animation, repainting a
+   full-screen fixed sheet every frame. Nothing resizes now — so the page makes room
+   itself: publish the keyboard height as --kb (CSS lifts sheets / pads scroll bodies by
+   it) and bring the focused field into view. No-ops on web, where there is no plugin. */
+function initKeyboard(){
+  var KB=capPlugin('Keyboard');
+  if(!KB||!KB.addListener)return;
+  function setKB(px){
+    var v=(typeof px==='number'&&isFinite(px)&&px>0)?Math.round(px):0;
+    document.documentElement.style.setProperty('--kb',v+'px');
+  }
+  function reveal(){
+    var el=document.activeElement;
+    if(!el||!el.scrollIntoView)return;
+    var tag=(el.tagName||'').toLowerCase();
+    if(tag!=='input'&&tag!=='textarea')return;
+    /* instant, not smooth — a scroll animation running as the keyboard slides in is
+       exactly the kind of overlapping motion we just removed */
+    try{el.scrollIntoView({block:'center'});}catch(e){try{el.scrollIntoView();}catch(e2){}}
+  }
+  KB.addListener('keyboardWillShow',function(info){setKB(info&&info.keyboardHeight);});
+  KB.addListener('keyboardDidShow',reveal);
+  KB.addListener('keyboardWillHide',function(){setKB(0);});
+}
 function initBackButton(){
   var App=capPlugin('App');
   if(App&&App.addListener){
@@ -3808,6 +3835,7 @@ function boot(){
   if(posted)renderHome();
   showView('view-home');
   initTilt();
+  initKeyboard();
   initBackButton();
   checkBio(function(v){
     bioReady=v;
