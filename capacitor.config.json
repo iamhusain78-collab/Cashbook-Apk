@@ -9,9 +9,12 @@
     "androidScheme": "https"
   },
   "plugins": {
+    "Keyboard": {
+      "resize": "none"
+    },
     "SplashScreen": {
       "launchShowDuration": 800,
-      "backgroundColor": "#0B0E12",
+      "backgroundColor": "#191612",
       "showSpinner": false
     }
   }
