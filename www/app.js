@@ -399,6 +399,24 @@ function closeSheet(id){
   if(id==='dlg-confirm'&&cfResolve){var r=cfResolve;cfResolve=null;r(false);}
 }
 function closeTop(){if(openStack.length)closeSheet(openStack[openStack.length-1]);}
+/* Focus a field only AFTER its sheet has finished sliding in.
+   Focusing mid-animation pops the Android soft keyboard while the sheet is still
+   transforming; the keyboard physically resizes the WebView, so the app was relaying
+   out underneath a running animation. That was the main cause of the entry-form
+   flicker reported on the APK (browsers never showed it — no soft keyboard).
+   transitionend is authoritative; the timer is a fallback for reduced-motion and for
+   any browser that skips the transition entirely. */
+function focusAfterOpen(sheetId,sel){
+  var sheet=$('#'+sheetId),done=false;
+  function go(){
+    if(done)return;done=true;
+    if(sheet)sheet.removeEventListener('transitionend',onEnd);
+    var el=$(sel);if(el&&el.focus)try{el.focus();}catch(e){}
+  }
+  function onEnd(e){if(e.target===sheet&&e.propertyName==='transform')go();}
+  if(sheet&&sheet.addEventListener)sheet.addEventListener('transitionend',onEnd);
+  setTimeout(go,560);
+}
 $('#scrim').addEventListener('click',closeTop);
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
@@ -426,7 +444,7 @@ function confirmDlg(o){
   $('#cf-ok').className='btn '+(o.danger?'out':'primary');
   $('#cf-ok').setAttribute('data-word',o.word||'');
   openSheet('dlg-confirm');
-  if(o.word)setTimeout(function(){$('#cf-input').focus();},120);
+  if(o.word)focusAfterOpen('dlg-confirm','#cf-input');
   return new Promise(function(res){cfResolve=res;});
 }
 $('#cf-input').addEventListener('input',function(){$('#cf-ok').disabled=$('#cf-input').value.trim()!==$('#cf-ok').getAttribute('data-word');});
@@ -690,7 +708,7 @@ function openXferSheet(id){
   $('#xf-delete').classList.toggle('hidden',!x);
   $$('#xf-dir button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-d')===xfDir);});
   openSheet('sheet-xfer');
-  setTimeout(function(){$('#xf-amount').focus();},160);
+  focusAfterOpen('sheet-xfer','#xf-amount');
 }
 $('#xf-dir').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;xfDir=b.getAttribute('data-d');$$('#xf-dir button').forEach(function(x){x.classList.toggle('on',x===b);});});
 $('#xf-amount').addEventListener('input',function(){
@@ -796,7 +814,7 @@ $('#btn-acc-open').addEventListener('click',function(){
   $('#ao-err').classList.add('hidden');
   $$('#ao-sign button').forEach(function(b){b.classList.toggle('on',+b.getAttribute('data-s')===aoSign);});
   openSheet('sheet-accopen');
-  setTimeout(function(){$('#ao-amount').focus();},140);
+  focusAfterOpen('sheet-accopen','#ao-amount');
 });
 $('#ao-sign').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;aoSign=+b.getAttribute('data-s');$$('#ao-sign button').forEach(function(x){x.classList.toggle('on',x===b);});});
 $('#ao-save').addEventListener('click',function(){
@@ -888,7 +906,7 @@ function openBookSheet(id,fromEntry){
   $$('#bk-open-sign button').forEach(function(x){x.classList.toggle('on',+x.getAttribute('data-s')===bkSign);});
   $('#bk-err').classList.add('hidden');
   openSheet('sheet-book');
-  setTimeout(function(){$('#bk-name').focus();},140);
+  focusAfterOpen('sheet-book','#bk-name');
 }
 $('#bk-open-sign').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;bkSign=+b.getAttribute('data-s');$$('#bk-open-sign button').forEach(function(x){x.classList.toggle('on',x===b);});});
 function saveBook(){
@@ -1301,7 +1319,7 @@ function openEntrySheet(opts){
   $('#ent-note').value=e?(e.note||''):(t?(t.note||''):(opts.noteDefault||''));
   paintEntFlood();paintEntMode();renderEntSelects();renderNoteChips();paintAttach();
   openSheet('sheet-entry');
-  setTimeout(function(){$('#ent-amount').focus();},170);
+  focusAfterOpen('sheet-entry','#ent-amount');
 }
 function paintEntFlood(){
   var sh=$('#sheet-entry');
@@ -1563,7 +1581,7 @@ function webDownloadBlob(blob,filename){
   document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
 }
 /* ============ in-app update check (direct APK channel only; Play updates itself) ============ */
-var APP_VERSION="6.0.0";
+var APP_VERSION="6.1.0";
 var UPDATE_URL="https://husainstudios.github.io/cashbook/version.json";
 function verCmp(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<3;i++){if((pa[i]||0)>(pb[i]||0))return 1;if((pa[i]||0)<(pb[i]||0))return -1;}return 0;}
 function checkForUpdate(){
@@ -1997,7 +2015,7 @@ function openPartySheet(id,fromEntry){
   $('#sp-err').classList.add('hidden');
   $('#sp-delete').classList.toggle('hidden',!p);
   openSheet('sheet-party');
-  setTimeout(function(){$('#sp-name').focus();},140);
+  focusAfterOpen('sheet-party','#sp-name');
 }
 $('#sp-role').addEventListener('click',function(e){
   var b=e.target.closest('button');if(!b)return;
@@ -2202,7 +2220,7 @@ $('#bud-list').addEventListener('click',function(e){
   $('#sb-err').classList.add('hidden');
   $('#sb-remove').classList.toggle('hidden',!bud);
   openSheet('sheet-budget');
-  setTimeout(function(){$('#sb-amount').focus();},140);
+  focusAfterOpen('sheet-budget','#sb-amount');
 });
 $('#sb-save').addEventListener('click',function(){
   var cents=parseAmt($('#sb-amount').value);
@@ -2979,7 +2997,7 @@ function openCatSheet(id,fromEntry){
   $('#sc-delete').classList.toggle('hidden',!c||c.builtin||c.id==='other');
   paintSwatches();
   openSheet('sheet-cat');
-  setTimeout(function(){$('#sc-name').focus();},140);
+  focusAfterOpen('sheet-cat','#sc-name');
 }
 $('#sc-colors').addEventListener('click',function(e){
   var b=e.target.closest('.swatch');if(!b)return;
@@ -3563,7 +3581,7 @@ function openSelectPicker(sel){
       var q=this.value.trim().toLowerCase();
       $$('#pick-opts .pickopt').forEach(function(o){o.classList.toggle('hidden',q&&o.textContent.toLowerCase().indexOf(q)<0);});
     });
-    setTimeout(function(){var ps=$('#pick-search');if(ps)ps.focus();},180);
+    focusAfterOpen('sheet-pick','#pick-search');
   }
   openSheet('sheet-pick');
 }
