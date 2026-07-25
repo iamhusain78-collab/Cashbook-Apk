@@ -577,7 +577,6 @@ h1,h2,h3,h4{font-weight:800;letter-spacing:-.02em}
 @keyframes rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
 @keyframes fabin{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
 @keyframes segpop{0%{transform:scale(.92)}60%{transform:scale(1.05)}100%{transform:scale(1)}}
-@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
 /* view / tab switch: snappy opacity fade — NO transform (would break position:sticky headers) */
 @keyframes viewin{from{opacity:0}to{opacity:1}}
 .view.active{animation:viewin .2s var(--easeo)}
@@ -601,7 +600,7 @@ html[data-theme="dark"] .nbtn.on .npill{color:#06272E}
 /* ---- hero balance card: 3D tilt + moving glare (JS sets --gx/--gy) ---- */
 .pb-row{flex-wrap:nowrap}
 .pb-row>div{white-space:nowrap;flex:none}
-.passbook{transform-style:preserve-3d;transition:transform .6s var(--springy),box-shadow .4s}
+.passbook{transition:transform .6s var(--springy),box-shadow .4s}
 .passbook .glow{position:absolute;inset:0;border-radius:inherit;background:radial-gradient(65% 90% at var(--gx,72%) var(--gy,18%),rgba(255,255,255,.17),transparent 70%);pointer-events:none}
 .pb-net{font-size:38px;font-weight:800;letter-spacing:-.03em}
 /* ---- bento tiles ---- */
@@ -691,8 +690,8 @@ html[data-theme="dark"] #book-tabs .tab.on{color:#06272E}
 .cal-cell.sel{animation:segpop .3s var(--spring)}
 html[data-theme="dark"] .cal-cell.sel{color:#06272E}
 .pickopt{border-radius:14px}
-/* ---- empty states: gentle float ---- */
-.empty .doodle{animation:bob 3.6s ease-in-out infinite}
+/* ---- empty states ---- (the `bob` float was removed in 6.1.3: an infinite animation
+   keeps a compositor job alive for as long as the empty state is on screen) */
 /* ---- paywall: staged entrance, accent plans ---- */
 .pw-logo{animation:fabin .55s var(--spring) .05s backwards}
 .pw-logo svg{fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
@@ -1070,18 +1069,49 @@ html[data-theme="dark"] .toast,html[data-theme="dark"] .snackbar{background:#3A3
 /* empty-state doodles → muted indigo */
 .empty .doodle{color:var(--brand)}
 
-/* ---- P12 (v6.1.1): soft-keyboard compensation ----
-   The keyboard now OVERLAYS the app instead of resizing it (Keyboard resize:"none" +
-   interactive-widget=overlays-content) — that resize was the entry-form flicker. Nothing
-   shrinks any more, so the layout has to yield the space itself. initKeyboard() publishes
-   the keyboard height as --kb; these rules are the only consumers.
-   --kb is 0 everywhere the plugin is absent (web/PWA), so all of this is inert there. */
+/* ============================================================
+   ---- P12 (v6.1.3): Android WebView paint stability ----
+   Everything in this block exists to stop the WebView repainting large areas. The rules
+   are inert on desktop; they matter enormously inside the APK.
+   ============================================================ */
+
+/* 1. A sheet must not be a transformed layer AND a scroll container at the same time.
+   That pairing is what made bands of the entry form paint their backgrounds but not
+   their text. The transform is needed only while it slides in, so openSheet() marks the
+   sheet .settled when the transition ends and we drop the transform completely.
+   (Above 720px the transform is doing real work — horizontal centring — so it stays.) */
+/* transition:none matters as much as transform:none — without it, dropping the transform
+   is itself an animated change (identity -> none), which keeps the composited layer alive
+   for another whole transition after the sheet has visibly stopped moving. */
+.sheet.open.settled{transform:none;transition:none}
+@media(min-width:720px){.sheet.open.settled{transform:translate(-50%,0)}}
+
+/* 2. Scrolling moves OFF the fixed element and onto an ordinary child — for EVERY sheet,
+   not just the full-page ones. A position:fixed element that scrolls its own overflow is
+   the fragile case in WebView; a plain block inside a fixed shell is the safe one. Bonus:
+   headers and footers now stay put while only the body scrolls, which is what these
+   panels should have done anyway. */
+.sheet{display:flex;flex-direction:column;overflow:hidden}
+.sheet>.grab,.sheet>.sheet-head,.sheet>.sheet-foot,.sheet>.entfl{flex:0 0 auto}
+.sheet>.sheet-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+
+/* 3. Full-page sheets slide on a plain ease. The springy curve overshoots past the end
+   position, which on a full-screen element means painting the whole viewport twice more
+   than necessary. Bottom sheets are small enough to keep their bounce. */
+.sheet.fullpage{transition:transform .34s var(--easeo)}
+
+/* 4. Soft-keyboard room. The keyboard overlays the app (Keyboard resize:"none" +
+   interactive-widget=overlays-content), so the layout has to yield the space itself.
+   initKeyboard() publishes the height as --kb and this is its ONLY consumer: we move the
+   sheet's bottom edge, which shrinks the scroll WINDOW. Padding the scroll body instead
+   would change its content height and reflow the form on every keyboard show — that was
+   the residual flicker in 6.1.2. --kb stays 0 wherever the plugin is absent (web/PWA). */
 :root{--kb:0px}
-/* bottom sheets sit on top of the keyboard instead of behind it */
-.sheet{bottom:var(--kb,0px)}
-/* full-page sheets keep their box; their scroll body gains the room instead */
-.sheet.fullpage{bottom:0}
-.sheet.fullpage .fpbody{padding-bottom:calc(28px + var(--kb,0px))}
-.sheet:not(.fullpage) .sheet-body{padding-bottom:calc(18px + var(--kb,0px))}
-/* the licence-key field lives near the bottom of a full-screen scroller */
-#paywall{padding-bottom:calc(40px + var(--kb,0px))}
+.sheet.open{bottom:var(--kb,0px)}
+#paywall{bottom:var(--kb,0px)}
+/* keep a focused field clear of the keyboard edge without touching layout */
+.sheet.fullpage>.fpbody{scroll-padding-bottom:24px}
+
+/* 5. The hero card's 3D rendering context was removed at source (see .passbook above).
+   initTilt() applies its own perspective() inside the transform, so it bought nothing —
+   it just kept the full-width card in a composited 3D layer permanently, on every phone. */

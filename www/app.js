@@ -391,10 +391,41 @@ else if(mq.addListener)mq.addListener(function(){if(S.settings.theme==='system')
 
 /* ============ sheets, dialogs, feedback ============ */
 var openStack=[],cfResolve=null;
-function openSheet(id){var el=$('#'+id);if(!el||openStack.indexOf(id)>-1)return;el.classList.add('open');openStack.push(id);$('#scrim').classList.add('show');if(typeof syncControls==='function')syncControls(el);}
+/* A sheet animates in on a transform, then we mark it .settled and CSS drops the
+   transform entirely. This matters: an element that is BOTH transformed and a scroll
+   container gets promoted to a composited layer whose tiles the Android WebView can
+   fail to rasterise — the symptom is a band of the form where backgrounds paint but
+   text does not. translateY(0) looks like nothing, but it is not nothing. */
+function settle(el){
+  if(!el||!el.classList)return;
+  el.classList.add('settled');
+  if(el._settleT){clearTimeout(el._settleT);el._settleT=null;}
+  if(el._onSettle){el.removeEventListener('transitionend',el._onSettle);el._onSettle=null;}
+}
+function openSheet(id){
+  var el=$('#'+id);if(!el||openStack.indexOf(id)>-1)return;
+  el.classList.remove('settled');
+  el.classList.add('open');
+  openStack.push(id);
+  $('#scrim').classList.add('show');
+  if(el.addEventListener){
+    el._onSettle=function(e){if(e.target===el&&e.propertyName==='transform')settle(el);};
+    el.addEventListener('transitionend',el._onSettle);
+  }
+  /* fallback for reduced-motion and any browser that skips the transition */
+  el._settleT=setTimeout(function(){settle(el);},560);
+  if(typeof syncControls==='function')syncControls(el);
+}
 function closeSheet(id){
   var i=openStack.indexOf(id);if(i>-1)openStack.splice(i,1);
-  var el=$('#'+id);if(el)el.classList.remove('open');
+  var el=$('#'+id);
+  if(el){
+    /* put the transform back before animating out, or there is nothing to animate */
+    el.classList.remove('settled');
+    if(el._settleT){clearTimeout(el._settleT);el._settleT=null;}
+    if(el._onSettle){el.removeEventListener('transitionend',el._onSettle);el._onSettle=null;}
+    el.classList.remove('open');
+  }
   if(!openStack.length)$('#scrim').classList.remove('show');
   if(id==='dlg-confirm'&&cfResolve){var r=cfResolve;cfResolve=null;r(false);}
 }
@@ -407,15 +438,20 @@ function closeTop(){if(openStack.length)closeSheet(openStack[openStack.length-1]
    transitionend is authoritative; the timer is a fallback for reduced-motion and for
    any browser that skips the transition entirely. */
 function focusAfterOpen(sheetId,sel){
-  var sheet=$('#'+sheetId),done=false;
+  var sheet=$('#'+sheetId),done=false,tries=0;
   function go(){
     if(done)return;done=true;
-    if(sheet)sheet.removeEventListener('transitionend',onEnd);
     var el=$(sel);if(el&&el.focus)try{el.focus();}catch(e){}
   }
-  function onEnd(e){if(e.target===sheet&&e.propertyName==='transform')go();}
-  if(sheet&&sheet.addEventListener)sheet.addEventListener('transitionend',onEnd);
-  setTimeout(go,560);
+  /* wait for openSheet() to mark the sheet .settled — i.e. the slide-in has finished AND
+     the transform has been dropped — so the keyboard never opens over a live animation
+     or a composited layer */
+  function tick(){
+    if(done)return;
+    if(!sheet||!sheet.classList||sheet.classList.contains('settled')||++tries>40){go();return;}
+    setTimeout(tick,25);
+  }
+  tick();
 }
 $('#scrim').addEventListener('click',closeTop);
 document.addEventListener('keydown',function(e){
@@ -490,6 +526,10 @@ function celebrate(type){
 function initTilt(){
   try{
     if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    /* Pointer-tilt is a mouse affordance. On a touch screen the pointermove handler fired
+       throughout every scroll gesture, re-transforming (and so repainting) the full-width
+       hero card while the list underneath was moving. Phones get the flat card. */
+    if(!(window.matchMedia&&window.matchMedia('(hover: hover) and (pointer: fine)').matches))return;
     $$('.passbook').forEach(function(card){
       if(card._tilt)return;card._tilt=1;
       var glow=document.createElement('span');glow.className='glow';card.appendChild(glow);
@@ -1581,7 +1621,7 @@ function webDownloadBlob(blob,filename){
   document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
 }
 /* ============ in-app update check (direct APK channel only; Play updates itself) ============ */
-var APP_VERSION="6.1.1";
+var APP_VERSION="6.1.3";
 var UPDATE_URL="https://husainstudios.github.io/cashbook/version.json";
 function verCmp(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<3;i++){if((pa[i]||0)>(pb[i]||0))return 1;if((pa[i]||0)<(pb[i]||0))return -1;}return 0;}
 function checkForUpdate(){
@@ -3581,7 +3621,9 @@ function openSelectPicker(sel){
       var q=this.value.trim().toLowerCase();
       $$('#pick-opts .pickopt').forEach(function(o){o.classList.toggle('hidden',q&&o.textContent.toLowerCase().indexOf(q)<0);});
     });
-    focusAfterOpen('sheet-pick','#pick-search');
+    /* deliberately NOT auto-focused: focusing it summoned the soft keyboard just to pick
+       from a list, which is both the flicker trigger and the wrong default — a list of 9
+       categories is scrolled, not typed. Tapping the box still searches. */
   }
   openSheet('sheet-pick');
 }
@@ -3797,18 +3839,13 @@ function initKeyboard(){
     var v=(typeof px==='number'&&isFinite(px)&&px>0)?Math.round(px):0;
     document.documentElement.style.setProperty('--kb',v+'px');
   }
-  function reveal(){
-    var el=document.activeElement;
-    if(!el||!el.scrollIntoView)return;
-    var tag=(el.tagName||'').toLowerCase();
-    if(tag!=='input'&&tag!=='textarea')return;
-    /* instant, not smooth — a scroll animation running as the keyboard slides in is
-       exactly the kind of overlapping motion we just removed */
-    try{el.scrollIntoView({block:'center'});}catch(e){try{el.scrollIntoView();}catch(e2){}}
-  }
+  /* No scrollIntoView here on purpose. --kb shrinks the sheet's scroll window to sit
+     above the keyboard, so the focused field is already inside the visible area and the
+     browser's own focus scrolling handles the rest. Forcing a scroll on a fixed,
+     full-screen container was leaving unrepainted bands behind. */
   KB.addListener('keyboardWillShow',function(info){setKB(info&&info.keyboardHeight);});
-  KB.addListener('keyboardDidShow',reveal);
   KB.addListener('keyboardWillHide',function(){setKB(0);});
+  KB.addListener('keyboardDidHide',function(){setKB(0);});
 }
 function initBackButton(){
   var App=capPlugin('App');
