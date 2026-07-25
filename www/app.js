@@ -1621,7 +1621,7 @@ function webDownloadBlob(blob,filename){
   document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
 }
 /* ============ in-app update check (direct APK channel only; Play updates itself) ============ */
-var APP_VERSION="6.1.4";
+var APP_VERSION="6.2.0";
 var UPDATE_URL="https://husainstudios.github.io/cashbook/version.json";
 function verCmp(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<3;i++){if((pa[i]||0)>(pb[i]||0))return 1;if((pa[i]||0)<(pb[i]||0))return -1;}return 0;}
 function checkForUpdate(){
