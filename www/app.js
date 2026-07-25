@@ -1621,7 +1621,7 @@ function webDownloadBlob(blob,filename){
   document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
 }
 /* ============ in-app update check (direct APK channel only; Play updates itself) ============ */
-var APP_VERSION="6.1.3";
+var APP_VERSION="6.1.4";
 var UPDATE_URL="https://husainstudios.github.io/cashbook/version.json";
 function verCmp(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<3;i++){if((pa[i]||0)>(pb[i]||0))return 1;if((pa[i]||0)<(pb[i]||0))return -1;}return 0;}
 function checkForUpdate(){
@@ -3825,6 +3825,44 @@ function appGoBack(){
   if(v!=='view-home'){goTab('view-home');return true;}
   return false;
 }
+/* ---- on-device diagnostics (tap the Settings footer five times) ----
+   The flicker only reproduces on a real phone, so this reports the facts that decide it
+   FROM the phone: which build is running, whether the keyboard plugin is wired, and —
+   the decisive one — whether the WebView is still being resized when the keyboard opens.
+   If the height range ever widens, Android is still resizing and no amount of CSS will
+   stop the repaint. Inert and hidden until asked for. */
+var DIAG={minH:0,maxH:0,kb:'0px',kbEvents:0,started:false};
+function diagPaint(){
+  var el=$('#diag');if(!el||el.classList.contains('hidden'))return;
+  var spread=DIAG.maxH-DIAG.minH;
+  el.innerHTML=
+    'build '+esc(APP_VERSION)+'  ·  native '+(IS_NATIVE?'yes':'no')+
+    '<br>keyboard plugin: '+(capPlugin('Keyboard')?'connected':'MISSING')+
+    '<br>keyboard events: '+DIAG.kbEvents+'  ·  --kb '+esc(DIAG.kb)+
+    '<br>viewport height: '+window.innerHeight+'  (range '+DIAG.minH+'–'+DIAG.maxH+')'+
+    '<br><b>'+(spread>50
+      ? 'WEBVIEW STILL RESIZING — '+spread+'px'
+      : 'webview not resizing')+'</b>';
+}
+function diagInit(){
+  DIAG.minH=DIAG.maxH=window.innerHeight;
+  DIAG.started=true;
+  window.addEventListener('resize',function(){
+    var h=window.innerHeight;
+    if(h<DIAG.minH)DIAG.minH=h;
+    if(h>DIAG.maxH)DIAG.maxH=h;
+    diagPaint();
+  });
+  var v=$('#app-ver');if(v)v.textContent='v'+APP_VERSION;
+  var f=$('#app-foot');if(!f)return;
+  var taps=0,last=0;
+  f.addEventListener('click',function(){
+    var now=Date.now();
+    taps=(now-last<1200)?taps+1:1;last=now;
+    if(taps>=5){taps=0;$('#diag').classList.toggle('hidden');diagPaint();}
+  });
+}
+
 /* ---- Android soft keyboard ----
    The Keyboard plugin is configured resize:"none" (capacitor.config.json), so opening the
    keyboard no longer resizes the WebView. That resize was the entry-form flicker: Android
@@ -3838,6 +3876,7 @@ function initKeyboard(){
   function setKB(px){
     var v=(typeof px==='number'&&isFinite(px)&&px>0)?Math.round(px):0;
     document.documentElement.style.setProperty('--kb',v+'px');
+    DIAG.kb=v+'px';DIAG.kbEvents++;diagPaint();
   }
   /* No scrollIntoView here on purpose. --kb shrinks the sheet's scroll window to sit
      above the keyboard, so the focused field is already inside the visible area and the
@@ -3872,6 +3911,7 @@ function boot(){
   if(posted)renderHome();
   showView('view-home');
   initTilt();
+  diagInit();
   initKeyboard();
   initBackButton();
   checkBio(function(v){

@@ -1112,6 +1112,12 @@ html[data-theme="dark"] .toast,html[data-theme="dark"] .snackbar{background:#3A3
 /* keep a focused field clear of the keyboard edge without touching layout */
 .sheet.fullpage>.fpbody{scroll-padding-bottom:24px}
 
+/* on-device diagnostic readout — hidden until the Settings footer is tapped five times */
+.diag{margin:0 4px 22px;padding:12px 14px;border-radius:12px;background:var(--surface-2);
+  border:1px solid var(--line);color:var(--ink);font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:11.5px;line-height:1.7;word-break:break-word}
+.diag b{color:var(--out)}
+
 /* 5. The hero card's 3D rendering context was removed at source (see .passbook above).
    initTilt() applies its own perspective() inside the transform, so it bought nothing —
    it just kept the full-width card in a composited 3D layer permanently, on every phone. */
