@@ -1,9 +1,9 @@
 /* Cashbook service worker — network-first HTML shell, cache-first versioned assets */
-var V='cb-6.2.1';
+var V='cb-6.5.0';
 /* Multi-file app shell: styles.css/app.js are pre-cached with their exact ?v= URLs
    (index.html references them that way), so each cache version holds a complete,
    consistent build — users can never get a half-old half-new app. */
-var ASSETS=['./','./index.html','./styles.css?v=6.2.1','./app.js?v=6.2.1','./manifest.webmanifest','./fonts/Archivo-var.woff2','./icons/icon-192.png','./icons/icon-512.png'];
+var ASSETS=['./','./index.html','./styles.css?v=6.5.0','./app.js?v=6.5.0','./manifest.webmanifest','./fonts/Archivo-var.woff2','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install',function(e){
   e.waitUntil(caches.open(V).then(function(c){return c.addAll(ASSETS);}).then(function(){return self.skipWaiting();}));
 });

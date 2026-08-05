@@ -23,7 +23,12 @@
   --brand:#4C4AA8; --brand-2:#37357E; --brand-soft:rgba(76,74,168,.12);
   --accent:#7A6CDF; --accent-2:#6D6BD8; --accent-soft:rgba(122,108,223,.14);
   --in:#2E7D4F; --in-soft:rgba(46,125,79,.10);
-  --out:#C05540; --out-soft:rgba(192,85,64,.10);
+  /* --out was #C05540, which measured 4.07:1 on the paper canvas and 4.37:1 on a day card —
+     under AA for normal-size text, and every "cash out" amount in the ledger is exactly
+     that. #B04630 is the same terracotta a step deeper: 4.99:1 and 5.35:1, so it passes at
+     any size rather than only when the amount happens to be large. Keep TONE.out in
+     renderPDF() and IMG.outcol in app.js in step with this. */
+  --out:#B04630; --out-soft:rgba(176,70,48,.10);
   --amber:#8A6516; --note-ink:#4A432E;
   --bank:#4C4AA8; --bank-soft:rgba(76,74,168,.12);
   --grad-paper:linear-gradient(180deg,#F6F2E8,#F0EBDD);
@@ -45,7 +50,7 @@
   --glow-hero:0 16px 36px -10px rgba(65,63,150,.40);
   --glow-fab:0 12px 26px -6px rgba(65,63,150,.45);
   --glow-in:0 10px 24px -8px rgba(46,125,79,.40);
-  --glow-out:0 10px 24px -8px rgba(192,85,64,.40);
+  --glow-out:0 10px 24px -8px rgba(176,70,48,.40);
   --r-xl:24px; --r-lg:20px; --r-md:14px; --r-sheet:26px;
   --dur:.18s; --ease:cubic-bezier(.22,.9,.3,1.1); --easeo:cubic-bezier(.2,.7,.3,1);
   --spring:cubic-bezier(.34,1.56,.64,1); --springy:cubic-bezier(.3,1.4,.45,1);
@@ -86,7 +91,7 @@ p{margin:0}
 .hidden{display:none!important}
 .ic{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex:none}
 .microlabel{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);font-weight:750}
-input[type="date"],input[type="time"],input[type="text"],input[type="search"],input[type="tel"],input[type="number"],input:not([type]),select{width:100%;height:50px;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:0 14px;transition:border-color var(--dur),box-shadow var(--dur);appearance:none;-webkit-appearance:none}
+input[type="date"],input[type="text"],input[type="search"],input[type="tel"],input[type="number"],input:not([type]),select{width:100%;height:50px;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:0 14px;transition:border-color var(--dur),box-shadow var(--dur);appearance:none;-webkit-appearance:none}
 input:focus,select:focus{border-color:var(--brand);outline:none;box-shadow:0 0 0 3px var(--brand-soft)}
 select{background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 12px) 55%;background-size:6px 6px;background-repeat:no-repeat;padding-right:34px;font-weight:600}
 .view{display:none;flex-direction:column;min-height:100dvh}
@@ -470,9 +475,9 @@ html[data-theme="dark"] .entry{background:var(--surface)}
 .pw-err{color:var(--out);font-size:13px;font-weight:600;text-align:center;min-height:18px}
 .pw-foot{text-align:center;font-size:12px;color:var(--faint);margin-top:26px;max-width:360px;margin-left:auto;margin-right:auto;line-height:1.6}
 /* paywall dark theme — bg gradient, plan cards and key button are hardcoded light above */
-html[data-theme="dark"] #paywall{background:linear-gradient(180deg,#0F1418,#171E24)}
+html[data-theme="dark"] #paywall{background:linear-gradient(180deg,#191612,#241F19)}
 html[data-theme="dark"] .pw-plan{background:var(--surface)}
-html[data-theme="dark"] .pw-keyrow .kbtn{background:#DEE4E8;color:#0F1418}
+html[data-theme="dark"] .pw-keyrow .kbtn{background:#DEE4E8;color:#191612}
 .pw-close{position:absolute;top:calc(12px + env(safe-area-inset-top));right:14px;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--muted);background:var(--surface-2)}
 .pw-close .ic{width:20px;height:20px}
 /* view-only lock: hide the primary write CTAs (all other writes/exports are gated in JS) */
@@ -561,9 +566,10 @@ input.enhanced{position:absolute!important;width:1px;height:1px;opacity:0;pointe
 .cal-cell:active{transform:scale(.9)}
 
 /* ============================================================
-   ===== v5.0 «LEDGER» REDESIGN LAYER =====
-   Ocean Teal brand · porcelain canvas · bento depth · spring motion
-   Research: 60-30-10, dimmed dark, thumb-zone, convex motion effect
+   ===== v5.0 «LEDGER» LAYER — superseded by the v6 «Paper Ledger» sections below =====
+   Kept because later sections override it rather than replace it; read P1-P14 at the end
+   of this file for what actually renders. The v5 Ocean Teal brand is GONE — do not revive
+   teal from this header, the brand is indigo (--brand).
    ============================================================ */
 /* ---- typography & base ---- */
 body{font-family:"Segoe UI Variable Text",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;letter-spacing:.001em}
@@ -592,7 +598,7 @@ html[data-theme="dark"] .card,html[data-theme="dark"] .kpi,html[data-theme="dark
 .nbtn{gap:3px;font-size:10px;letter-spacing:.02em}
 .nbtn .npill{padding:5px 16px;border-radius:999px;transition:background .35s var(--spring),transform .35s var(--spring),color .2s}
 .nbtn.on .npill{background:var(--brand);color:#fff;transform:translateY(-2px);box-shadow:0 6px 14px -4px color-mix(in srgb,var(--brand) 55%,transparent)}
-html[data-theme="dark"] .nbtn.on .npill{color:#06272E}
+html[data-theme="dark"] .nbtn.on .npill{color:#191612}
 /* ---- FAB: springy, glowing ---- */
 .fab{animation:fabin .5s var(--spring) .15s backwards}
 .fab:active{transform:scale(.88)}
@@ -619,8 +625,8 @@ html[data-theme="dark"] .btn.primary{color:#052A31}
 html[data-theme="dark"] .btn.in{color:#052E1B}
 html[data-theme="dark"] .btn.out{color:#40101B}
 html[data-theme="dark"] .selbar{color:#fff}
-html[data-theme="dark"] .fbadge{color:#06272E}
-html[data-theme="dark"] .eact.dup{color:#06272E}
+html[data-theme="dark"] .fbadge{color:#191612}
+html[data-theme="dark"] .eact.dup{color:#191612}
 .iconbtn.boxed{border-radius:14px}
 /* ---- segmented controls: springy thumb pop, semantic in/out ---- */
 .seg{border-radius:16px;padding:4px}
@@ -630,10 +636,10 @@ html[data-theme="dark"] .eact.dup{color:#06272E}
 .typeseg button.on[data-t="out"]{background:var(--out-soft);box-shadow:inset 0 0 0 1.5px var(--out)}
 /* ---- chips: bold brand fill when active ---- */
 .chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
-html[data-theme="dark"] .chip.on{color:#06272E}
+html[data-theme="dark"] .chip.on{color:#191612}
 .qchip{border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent-soft) 55%,var(--surface))}
 /* ---- inputs ---- */
-input[type="date"],input[type="time"],input[type="text"],input[type="search"],input[type="tel"],input[type="number"],input:not([type]),select{height:52px;border-radius:15px}
+input[type="date"],input[type="text"],input[type="search"],input[type="tel"],input[type="number"],input:not([type]),select{height:52px;border-radius:15px}
 input:focus,select:focus,.notearea:focus{box-shadow:0 0 0 4px var(--brand-soft)}
 .amount-in{height:74px;border-radius:18px}
 .amount-in input{font-size:30px;font-weight:800}
@@ -674,9 +680,6 @@ input:focus,select:focus,.notearea:focus{box-shadow:0 0 0 4px var(--brand-soft)}
 .kpis .kpi:nth-child(3){background:linear-gradient(160deg,var(--brand-soft),var(--surface) 65%)}
 .mfill{background:linear-gradient(90deg,var(--brand),var(--accent))}
 /* ---- book tabs ---- */
-#book-tabs .tab{background:var(--surface-2);color:var(--muted);transition:background .3s var(--spring),color .2s}
-#book-tabs .tab.on{background:var(--brand);color:#fff;animation:segpop .35s var(--spring)}
-html[data-theme="dark"] #book-tabs .tab.on{color:#06272E}
 /* ---- PIN pad ---- */
 .pkey{border-radius:22px;font-weight:800}
 .pkey:active{transform:scale(.88)}
@@ -686,7 +689,7 @@ html[data-theme="dark"] #book-tabs .tab.on{color:#06272E}
 /* ---- calendar & picker ---- */
 .cal-cell{border-radius:12px}
 .cal-cell.sel{animation:segpop .3s var(--spring)}
-html[data-theme="dark"] .cal-cell.sel{color:#06272E}
+html[data-theme="dark"] .cal-cell.sel{color:#191612}
 .pickopt{border-radius:14px}
 /* ---- empty states ---- (the `bob` float was removed in 6.1.3: an infinite animation
    keeps a compositor job alive for as long as the empty state is on screen) */
@@ -701,7 +704,7 @@ html[data-theme="dark"] .cal-cell.sel{color:#06272E}
 .pw-btn{border-radius:16px;background:linear-gradient(160deg,var(--brand),var(--brand-2));transition:transform .3s var(--spring)}
 .pw-btn:active{transform:scale(.96)}
 html[data-theme="dark"] .pw-btn{color:#052A31}
-html[data-theme="dark"] .pw-plan.best::after{color:#06272E}
+html[data-theme="dark"] .pw-plan.best::after{color:#191612}
 /* ---- banners ---- */
 .trial-banner{background:linear-gradient(90deg,#0FA3B1,#0B5C6B)}
 .upd-banner b{background:linear-gradient(135deg,#14B8C6,#0B5C6B)}
@@ -906,7 +909,6 @@ html[data-theme="dark"] .btn.primary{color:#fff}
 .erow2 .selectbtn,.erow2 .datebtn{width:auto;max-width:60%;height:44px;border:0;background:none;box-shadow:none;padding:0;font-weight:700;font-size:13.5px;justify-content:flex-end}
 .erow2 .selectbtn:active,.erow2 .datebtn:active{box-shadow:none;border:0;background:var(--surface-2)}
 .erow2 .selectbtn .sbtxt,.erow2 .datebtn .sbtxt{flex:none;text-align:right}
-.erow2 input[type="time"]{width:auto;height:40px;border:0;background:none;box-shadow:none;text-align:right;font-weight:700;font-size:13.5px;padding:0}
 .erow2 .seg.mini{background:var(--surface-2);border-radius:999px}
 .erow2 .seg.mini button{border-radius:999px}
 .erow2 .seg.mini button.on{background:var(--grad-card);color:var(--ink);box-shadow:0 1px 4px rgba(38,36,32,.18)}
@@ -945,7 +947,8 @@ html[data-theme="dark"] .btn.primary{color:#fff}
 .detlinks{display:flex;justify-content:center;gap:22px;margin-top:14px}
 
 /* ---- P7: parties — collect/pay band, circle avatars, role subtitles ---- */
-.ppband{display:flex;border-radius:20px;overflow:hidden;margin:4px 0 14px;box-shadow:var(--shadow)}
+.ppband{display:flex;flex-direction:column;gap:10px;margin:4px 0 14px}
+.ppsplit{display:flex;border-radius:18px;overflow:hidden;box-shadow:var(--shadow)}
 .ppc{flex:1;padding:16px 20px}
 .ppc span{display:block;font-size:9.5px;letter-spacing:.16em;font-weight:700}
 .ppc b{display:block;font-size:19px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}
@@ -955,6 +958,25 @@ html[data-theme="dark"] .btn.primary{color:#fff}
 .ppc.pay span,.ppc.pay b{color:var(--out)}
 html[data-theme="dark"] .ppc.collect{background:linear-gradient(180deg,rgba(91,196,136,.14),rgba(91,196,136,.08))}
 html[data-theme="dark"] .ppc.pay{background:linear-gradient(180deg,rgba(233,138,114,.14),rgba(233,138,114,.08))}
+/* The net position card. It sits ABOVE the two-up split and is deliberately bigger: the
+   to-receive/to-pay pair are the two halves of a subtraction, and this is its answer — the
+   one number that says whether he is up or down overall. Same relationship as the Home hero
+   and its Cash/Bank sub-rows, so the two tabs read the same way.
+   30px is roughly 1.6x the 19px component figures — enough to lead without shouting. */
+.ppnet{border-radius:20px;padding:17px 20px 18px;box-shadow:var(--shadow);text-align:center}
+.ppnet span{display:block;font-size:10px;letter-spacing:.15em;font-weight:750;text-transform:uppercase}
+.ppnet b{display:block;font-size:30px;font-weight:800;line-height:1.1;margin-top:5px;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ppnet.pos{background:linear-gradient(180deg,#EDF6EF,#DDEDE2)}
+.ppnet.pos span,.ppnet.pos b{color:var(--in)}
+.ppnet.neg{background:linear-gradient(180deg,#FAEEE9,#F4DED4)}
+.ppnet.neg span,.ppnet.neg b{color:var(--out)}
+/* nothing owed either way — neutral, because green would imply "good" and red "bad" */
+.ppnet.zero{background:var(--grad-card);border:1px solid var(--line)}
+.ppnet.zero span{color:var(--muted)}
+.ppnet.zero b{color:var(--ink)}
+html[data-theme="dark"] .ppnet.pos{background:linear-gradient(180deg,rgba(91,196,136,.18),rgba(91,196,136,.09))}
+html[data-theme="dark"] .ppnet.neg{background:linear-gradient(180deg,rgba(233,138,114,.18),rgba(233,138,114,.09))}
 .prow{padding:14px}
 .prow .sl{display:flex;flex-direction:column;gap:2px;min-width:0}
 .prow .pnm{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1156,3 +1178,77 @@ html[data-theme="dark"] .daycard{
 /* 5. The hero card's 3D rendering context was removed at source (see .passbook above).
    initTilt() applies its own perspective() inside the transform, so it bought nothing —
    it just kept the full-width card in a composited 3D layer permanently, on every phone. */
+
+/* ============================================================
+   ---- P14 (v6.3.0): ledger hierarchy ----
+   P13 gave every ledger one surface. It did not give the rows an order to be read in,
+   and measured on the phone the reason was plain: the amount was 14.5px/700 and the note
+   right beside it was 14px/600 — a size ratio of 1.03. Two things of equal weight, so the
+   eye had nothing to land on and the whole list read as grey texture.
+
+   The row is now three tiers, and the gaps between them are deliberate:
+     1  AMOUNT   19px/800  — the thing he is actually scanning for
+     2  note     15px/650  — what it was
+        category · party   12px/500
+     3  mode / balance     11.5px  — the detail you only read once you've stopped
+
+   Amount-to-note goes 1.03 -> 1.27 with a 150-unit weight gap behind it. At 19px/800 the
+   amount also clears WCAG's large-text threshold, so its colour has room to spare.
+
+   Everything here was measured, not eyeballed. The three numbers that failed AA before
+   this section existed: the day-closing balance (2.42:1 light), the running balance in the
+   Cash/Bank and Party statements (2.60:1), and every cash-out amount (4.07:1) — the first
+   two because they used --faint for a real number, the third fixed at the token.
+   --faint is fine for a disabled glyph; it is not a text colour. Do not put a number in it.
+   ============================================================ */
+
+/* ---- the row ---- */
+.entry{padding:12px 14px}
+.e2head{display:flex;align-items:center;gap:12px}
+
+/* tier 2 — what the entry was */
+.e2title{font-size:15px;font-weight:650;line-height:1.25;color:var(--ink)}
+.e2sub{margin-top:3px;font-size:12px;font-weight:500;line-height:1.2;color:var(--muted)}
+
+/* tier 1 — the amount. tabular-nums keeps the columns of digits aligned down the card,
+   which is most of what makes a ledger scannable at a glance. */
+/* No padding-left: .e2head's 12px gap is already the gutter, and every pixel spent here is
+   a pixel taken off the note, which is the first thing to truncate. Growing the amount from
+   14.5px to 19px costs the note ~17px of width; tightening this gutter and the symbol
+   spacing gives all of it back, so the note still truncates exactly where it used to. */
+/* padding-left:0 explicitly — P4 sets 6px and the base layer 4px, so simply omitting the
+   declaration here silently hands the gutter back to whichever of those wins. */
+.e2right{flex:none;text-align:right;padding-left:0}
+.e2amt{font-size:19px;font-weight:800;line-height:1.15;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+/* The sign stays; the currency symbol was dropped from rows entirely at 6.4.0, so there is
+   no longer a sub-sized glyph here — wherever the symbol IS shown it now renders at the same
+   size as the digits beside it, because money() is plain text at the element's own size. */
+.e2amt .esign{margin-right:3px;font-weight:700}
+/* the Party statement says Gave/Got instead of a +/- sign; same idea, same weight break */
+.e2amt .elbl{font-size:.66em;font-weight:700;margin-right:4px;letter-spacing:0}
+
+/* tier 3 — payment mode, or the running balance where the ledger has one. --muted, never
+   --faint: these are numbers and a number you cannot read is worse than no number. */
+.e2meta{margin-top:3px;font-size:11.5px;font-weight:500;color:var(--muted);white-space:nowrap}
+.e2bal,#pd-entries .e2bal,#acc-list .e2bal{margin-top:3px;font-size:11.5px;font-weight:600;
+  color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* a transfer now renders the ordinary row anatomy; this is just its direction glyph */
+.e2sub .subxfer{display:inline-flex;align-items:center;gap:5px}
+.e2sub .subxfer .ic{width:13px;height:13px;color:var(--muted)}
+
+/* ---- the day header ---- */
+/* The closing balance is the point of a day group and it was the least legible text in the
+   app: 10.5px, weight 400, --faint, 2.42:1. It is a number, so it is now ink and tabular,
+   with the word doing the labelling instead of the colour. Left as ink rather than green or
+   red — those two are reserved for money in and money out, and a balance is neither. */
+.dayhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:2px 6px 8px}
+.dayhead h4{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.dayhead .dsub{font-size:13px;font-weight:750;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dayhead .dsublbl{margin-right:6px;font-size:10px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted)}
+
+/* ---- rhythm ---- */
+/* Rows carry more now and are still slightly shorter than before (~69px -> ~64px); the air
+   moves out of the rows and into the gap between day groups, where it separates something. */
+.day{margin-bottom:20px}

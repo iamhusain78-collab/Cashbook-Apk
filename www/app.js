@@ -174,7 +174,13 @@ function nfmt(cents){
   return (neg?'\u2212':'')+groupInt(String(r));
 }
 function money(cents){var neg=cents<0;return (neg?'\u2212':'')+curSym()+' '+nfmt(Math.abs(cents));}
+/* money()/moneySigned() carry the currency symbol; nfmt()/nfmtSigned() do not. The rule:
+   the symbol appears on a screen's ONE primary balance (the hero card, a book card on Home,
+   the cash-counter total, the entry-detail amount), on the labels of amount INPUTS, and on
+   anything that leaves the app — PDF, CSV, share text, share image. Every other number in
+   the UI is bare. Reach for nfmt/nfmtSigned by default. */
 function moneySigned(cents,type){return (type==='in'?'+':'\u2212')+' '+curSym()+' '+nfmt(cents);}
+function nfmtSigned(cents,type){return (type==='in'?'+':'\u2212')+' '+nfmt(cents);}
 function compact(cents){
   var v=Math.abs(cents)/100,s=cents<0?'\u2212':'';
   if(S.settings.grouping==='lakh'){
@@ -257,6 +263,9 @@ function fmtDate(ts){
     default:return dd+'/'+mm+'/'+yyyy;
   }
 }
+/* Entries are date-only from 6.3.0, so this is NOT dead code left over from that: its one
+   remaining caller is the "Printed <date> <time>" stamp in the PDF header, which records
+   when the report was generated. Do not remove it in a dead-code sweep. */
 function fmtTime(ts){return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
 function sod(d){d=new Date(d);d.setHours(0,0,0,0);return d;}
 function addDays(d,n){d=new Date(d);d.setDate(d.getDate()+n);return d;}
@@ -269,7 +278,26 @@ function dayLabel(key){
   return d.toLocaleDateString([],{weekday:'short'})+', '+fmtDate(d.getTime());
 }
 function dateInputVal(d){d=new Date(d);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
-function timeInputVal(d){d=new Date(d);return pad(d.getHours())+':'+pad(d.getMinutes());}
+/* v6.3.0 — entries carry a DATE only; time is never entered and never displayed.
+   ts stays a full timestamp because grouping, sorting and ranges all read it, so a
+   date-only entry is stored at NOON local:
+     · noon is DST-safe — midnight can land on the previous day in zones that shift,
+     · it is already this codebase's fallback (transfers defaulted to '12:00'),
+     · entries saved on the same day tie-break on `created`, which is the real save
+       order, so the ledger still reads in the order things happened.
+   Existing data is never rewritten: an entry saved before 6.3.0 keeps its exact ts
+   (and therefore its exact position), we simply stop showing the time.
+   Recurring rules use dayStartTs instead — see saveRecurring. */
+function dayNoonTs(y,m,d){return new Date(y,m,d,12,0,0,0).getTime();}
+function dayStartTs(y,m,d){return new Date(y,m,d,0,0,0,0).getTime();}
+/* 'YYYY-MM-DD' from a date input -> a timestamp, keeping `keepTs` untouched when it
+   already falls on that same day (so editing a note never reorders an old entry). */
+function tsFromDateInput(v,keepTs){
+  if(!v)return Date.now();
+  if(typeof keepTs==='number'&&isFinite(keepTs)&&dayKeyOf(keepTs)===v)return keepTs;
+  var p=v.split('-');
+  return dayNoonTs(+p[0],+p[1]-1,+p[2]);
+}
 function parseRangeInput(fromStr,toStr){
   if(!fromStr||!toStr)return null;
   var f=new Date(fromStr+'T00:00:00'),t=new Date(toStr+'T00:00:00');
@@ -371,11 +399,6 @@ function noteSuggestions(bookId,type){
   });
   return Object.keys(m).map(function(k){return m[k];})
     .sort(function(a,b){return (b.c-a.c)||(b.last-a.last);}).slice(0,8).map(function(x){return x.t;});
-}
-function allTotals(r){
-  var tin=0,tout=0,n=0;
-  S.entries.forEach(function(e){if(e.ts>=r[0]&&e.ts<r[1]){n++;if(e.type==='in')tin+=e.amount;else tout+=e.amount;}});
-  return{tin:tin,tout:tout,n:n};
 }
 function reportTotals(es){var tin=0,tout=0;es.forEach(function(e){if(e.type==='in')tin+=e.amount;else tout+=e.amount;});return{tin:tin,tout:tout};}
 
@@ -568,7 +591,6 @@ function showView(id){
 }
 function renderFor(id){
   if(id==='view-home')renderHome();
-  else if(id==='view-books')renderBooks();
   else if(id==='view-parties')renderParties();
   else if(id==='view-analytics')renderGlobalAnalytics();
   else if(id==='view-settings')renderSettings();
@@ -590,27 +612,6 @@ $('#bottomnav').addEventListener('click',function(e){
 });
 
 /* ============ home: accounts, today, passbook, search, recent ============ */
-function sparkSVG(strokeCol,dotCol){
-  if(!S.entries.length)return '';
-  var start=addDays(sod(new Date()),-29).getTime(),end=addDays(sod(new Date()),1).getTime();
-  var opening=0;
-  S.books.forEach(function(b){opening+=b.opening;});
-  S.entries.forEach(function(e){if(e.ts<start)opening+=signed(e);});
-  var pts=[],bal=opening,d,t;
-  for(d=start;d<end;d=addDays(d,1).getTime()){
-    t=addDays(d,1).getTime();
-    S.entries.forEach(function(e){if(e.ts>=d&&e.ts<t)bal+=signed(e);});
-    pts.push(bal);
-  }
-  var mn=Math.min.apply(null,pts),mx=Math.max.apply(null,pts);
-  if(mn===mx){mn-=100;mx+=100;}
-  var W=96,H=34,path='';
-  pts.forEach(function(v,i){
-    var x=(W-4)*i/(pts.length-1)+2,y=2+(1-(v-mn)/(mx-mn))*(H-4);
-    path+=(i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';
-  });
-  return '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" aria-label="30 day trend"><path d="'+path+'" fill="none" stroke="'+strokeCol+'" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="'+(W-2)+'" cy="'+(2+(1-(pts[pts.length-1]-mn)/(mx-mn))*(H-4)).toFixed(1)+'" r="3" fill="'+dotCol+'"/></svg>';
-}
 function renderBanners(){
   $('#persist-banner').classList.toggle('hidden',store.persistent);
   var st=S.settings,now=Date.now();
@@ -620,6 +621,14 @@ function renderBanners(){
 $('#bb-do').addEventListener('click',function(){shareBackup();renderBanners();});
 $('#bb-later').addEventListener('click',function(){S.settings.backupSnooze=Date.now()+7*86400000;save();renderBanners();});
 var HQ='';
+/* The ledger amount: sign + digits, no currency symbol. Every row on a screen is the same
+   currency, so repeating the symbol 16 times down a card is noise — the screen's primary
+   balance carries it (see the money() vs nfmt() split below) and the rows stay bare
+   numbers. moneySigned() is still the plain-text form for anything that leaves the app. */
+function amtRowHtml(cents,type){
+  return '<span class="esign">'+(type==='in'?'+':'−')+'</span>'+
+    '<span class="enum">'+nfmt(cents)+'</span>';
+}
 function entryCardInner(e,opts){
   /* v6 Paper Ledger row: title (note first line) + category dot line, signed amount right */
   opts=opts||{};
@@ -631,8 +640,12 @@ function entryCardInner(e,opts){
   var subBits=['<span class="subcat"><span class="catdot" style="background:'+(c.color||hashColor(c.id))+'"></span>'+esc(c.name)+'</span>'];
   if(opts.bookName)subBits.push('<span>'+esc(opts.bookName)+'</span>');
   if(opts.partyName)subBits.push('<span>'+esc(opts.partyName)+'</span>');
-  var amt=opts.amtHtml!==undefined?opts.amtHtml:'<div class="e2amt '+e.type+'">'+moneySigned(e.amount,e.type)+'</div>';
-  var bal=opts.balHtml||'';
+  var amt=opts.amtHtml!==undefined?opts.amtHtml:'<div class="e2amt '+e.type+'">'+amtRowHtml(e.amount,e.type)+'</div>';
+  /* The slot under the amount is "the second number". Which number depends on the ledger:
+     the Cash/Bank and Party statements pass their running balance, and where there isn't
+     one — the book ledger and Home search — it carries the payment mode instead, which is
+     what decides whether an entry lands in Cash in hand or in the Bank. */
+  var bal=opts.balHtml||'<div class="e2meta">'+esc(e.mode)+'</div>';
   return '<div class="e2head"><span class="selcheck"><svg class="ic"><use href="#i-check"/></svg></span>'+
     '<div class="e2main"><div class="e2title">'+esc(title)+'</div><div class="e2sub">'+subBits.join('')+(marks?'<span class="e2marks">'+marks+'</span>':'')+'</div></div>'+
     '<div class="e2right">'+amt+bal+'</div></div>';
@@ -675,8 +688,8 @@ function renderHome(){
   if(!S.books.length){empty.classList.remove('hidden');main.classList.add('hidden');return;}
   empty.classList.add('hidden');main.classList.remove('hidden');
   var _cb=cashBal(),_bb=bankBal();
-  countUp($('#acc-cash-bal'),_cb);
-  countUp($('#acc-bank-bal'),_bb);
+  countUp($('#acc-cash-bal'),_cb,nfmt);
+  countUp($('#acc-bank-bal'),_bb,nfmt);
   $('#acc-cash-bal').classList.toggle('neg',_cb<0);
   $('#acc-bank-bal').classList.toggle('neg',_bb<0);
   var net=0;S.books.forEach(function(b){net+=bookNet(b.id);});
@@ -743,7 +756,6 @@ function openXferSheet(id){
   $('#xf-err').classList.add('hidden');
   var when=x?new Date(x.ts):new Date();
   $('#xf-date').value=dateInputVal(when);
-  $('#xf-time').value=timeInputVal(when);
   $('#xf-note').value=x?(x.note||''):'';
   $('#xf-delete').classList.toggle('hidden',!x);
   $$('#xf-dir button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-d')===xfDir);});
@@ -753,14 +765,14 @@ function openXferSheet(id){
 $('#xf-dir').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;xfDir=b.getAttribute('data-d');$$('#xf-dir button').forEach(function(x){x.classList.toggle('on',x===b);});});
 $('#xf-amount').addEventListener('input',function(){
   var s=this.value;$('#xf-err').classList.add('hidden');
-  if(/[+\-*/()]/.test(s)){var v=calcEval(s);$('#xf-calc').textContent=(v!==null&&v>0)?'= '+curSym()+' '+nfmt(Math.round(v*100)):'';}
+  if(/[+\-*/()]/.test(s)){var v=calcEval(s);$('#xf-calc').textContent=(v!==null&&v>0)?'= '+nfmt(Math.round(v*100)):'';}
   else $('#xf-calc').textContent='';
 });
 $('#xf-save').addEventListener('click',function(){
   var cents=parseAmt($('#xf-amount').value);
   if(cents===null){$('#xf-err').classList.remove('hidden');return;}
-  var d=$('#xf-date').value,tp=($('#xf-time').value||'12:00').split(':'),ts;
-  if(d){var dp=d.split('-');ts=new Date(+dp[0],+dp[1]-1,+dp[2],+tp[0]||0,+tp[1]||0).getTime();}else ts=Date.now();
+  var prevX=xfEditing?xferById(xfEditing):null;
+  var ts=tsFromDateInput($('#xf-date').value,prevX?prevX.ts:null);
   var note=$('#xf-note').value.trim();
   if(xfEditing){
     var x=xferById(xfEditing);
@@ -793,7 +805,7 @@ function renderAccount(){
   countUp(big,mv.closing);
   big.classList.toggle('neg',mv.closing<0);
   $('#acc-lbl').textContent='Balance right now';
-  $('#acc-sub').textContent='Opening '+money(mv.opening)+' \u00B7 '+mv.items.length+' movement'+(mv.items.length===1?'':'s');
+  $('#acc-sub').textContent='Opening '+nfmt(mv.opening)+' \u00B7 '+mv.items.length+' movement'+(mv.items.length===1?'':'s');
   $$('#acc-range .chip').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-r')===ACCR.r);});
   $('#acc-custom').classList.toggle('hidden',ACCR.r!=='custom');
   var range=null;
@@ -815,14 +827,21 @@ function renderAccount(){
         var bal=mv.run[it.id];
         if(it.kind==='t'){
           var x=it.ref,dirTxt=acc==='cash'?(x.dir==='c2b'?'To Bank account':'From Bank account'):(x.dir==='c2b'?'From Cash in hand':'To Cash in hand');
+          /* A transfer is an ordinary row of this ledger, so it uses the ordinary row
+             anatomy. It used to render the legacy .eic/.emid/.etitle markup, which put a
+             14.5px/700 title next to its 14px/600 neighbours \u2014 visibly off-scale in the
+             middle of an otherwise uniform list. */
+          var xt=it.eff>0?'in':'out';
           return '<div class="erow"><button class="entry xrow" data-xid="'+x.id+'">'+
-            '<div class="eic"><svg class="ic"><use href="#i-xfer"/></svg></div>'+
-            '<div class="emid"><div class="etitle">'+(x.note?esc(x.note):'Transfer')+'</div><div class="esub">'+dirTxt+'</div></div>'+
-            '<div class="e2right"><div class="e2amt '+(it.eff>0?'in':'out')+'">'+(it.eff>0?'+ ':'\u2212 ')+curSym()+' '+nfmt(Math.abs(it.eff))+'</div><div class="e2bal">Balance: '+nfmt(bal)+'</div></div></button></div>';
+            '<div class="e2head"><div class="e2main">'+
+            '<div class="e2title">'+(x.note?esc(x.note):'Transfer')+'</div>'+
+            '<div class="e2sub"><span class="subxfer"><svg class="ic"><use href="#i-xfer"/></svg>'+esc(dirTxt)+'</span></div></div>'+
+            '<div class="e2right"><div class="e2amt '+xt+'">'+amtRowHtml(Math.abs(it.eff),xt)+'</div>'+
+            '<div class="e2bal">Bal '+nfmt(bal)+'</div></div></div></button></div>';
         }
         var e=it.ref,b=bookById(e.bookId);
         return '<div class="erow"><button class="entry" data-gid="'+e.id+'">'+
-          entryCardInner(e,{bookName:b?b.name:'?',partyName:e.partyId&&partyById(e.partyId)?partyById(e.partyId).name:'',balHtml:'<div class="e2bal">Balance: '+nfmt(bal)+'</div>'})+
+          entryCardInner(e,{bookName:b?b.name:'?',partyName:e.partyId&&partyById(e.partyId)?partyById(e.partyId).name:'',balHtml:'<div class="e2bal">Bal '+nfmt(bal)+'</div>'})+
           '</button></div>';
       }).join('')+'</div></div>';
   }).join('');
@@ -872,33 +891,7 @@ $('#btn-acc-menu').addEventListener('click',function(){
   ]);
 });
 
-/* ============ books tab, menus, book CRUD ============ */
-function renderBooks(){
-  var list=$('#books-list'),empty=$('#books-empty');
-  if(!S.books.length){empty.classList.remove('hidden');list.innerHTML='';return;}
-  empty.classList.add('hidden');
-  list.innerHTML=S.books.map(function(b){
-    var t=bookTotals(b.id),es=bookEntries(b.id),n=es.length,last=0;
-    es.forEach(function(e){if(e.ts>last)last=e.ts;});
-    var cls=t.net>0?'pos':(t.net<0?'neg':'');
-    return '<div class="bookcard card" data-id="'+b.id+'" role="button" tabindex="0" aria-label="Open '+esc(b.name)+'">'+
-      '<div class="bic" style="background:'+hashColor(b.id)+'22;color:'+hashColor(b.id)+'"><svg class="ic"><use href="#i-book"/></svg></div>'+
-      '<div class="bmid"><div class="bname">'+esc(b.name)+'</div><div class="bsub">'+n+(n===1?' entry':' entries')+(last?' \u00B7 last '+fmtDate(last):'')+'</div></div>'+
-      '<div class="bbal '+cls+'">'+money(t.net)+'</div>'+
-      '<button class="iconbtn" data-menu="'+b.id+'" aria-label="Options for '+esc(b.name)+'"><svg class="ic"><use href="#i-more"/></svg></button></div>';
-  }).join('');
-  stagger(list);
-}
-$('#books-list').addEventListener('click',function(e){
-  var k=e.target.closest('[data-menu]');
-  if(k){bookMenu(k.getAttribute('data-menu'));return;}
-  var c=e.target.closest('.bookcard');if(c)openBook(c.getAttribute('data-id'));
-});
-$('#books-list').addEventListener('keydown',function(e){
-  if(e.key!=='Enter'&&e.key!==' ')return;
-  var c=e.target.closest('.bookcard');
-  if(c&&!e.target.closest('[data-menu]')){e.preventDefault();openBook(c.getAttribute('data-id'));}
-});
+/* ============ book menus, book CRUD ============ */
 var menuActions=[];
 function menuSheet(items){
   menuActions=items;
@@ -994,8 +987,6 @@ function deleteBook(id){
     toast('Book deleted');
   });
 }
-$('#btn-new-book').addEventListener('click',function(){openBookSheet(null);});
-$('#btn-books-new').addEventListener('click',function(){openBookSheet(null);});
 $('#btn-empty-new').addEventListener('click',function(){openBookSheet(null);});
 
 /* ============ open book, tabs, summary, filters ============ */
@@ -1030,7 +1021,7 @@ function renderSummary(){
   var t=bookTotals(currentBook);
   var el=$('#book-balsub');
   if(lastBal===null)el._cv=undefined;
-  countUp(el,t.net,function(v){return 'Balance '+money(v);});
+  countUp(el,t.net,function(v){return 'Balance '+nfmt(v);});
   lastBal=t.net;
 }
 function activeRange(){
@@ -1078,7 +1069,7 @@ function renderQuickbar(){
   bar.classList.remove('hidden');
   bar.innerHTML=ts.map(function(t){
     var label=t.note||catById(t.categoryId).name;
-    if(t.amount)label+=' \u00B7 '+curSym()+compact(t.amount);
+    if(t.amount)label+=' \u00B7 '+compact(t.amount);
     return '<span class="qchip" data-tid="'+t.id+'"><svg class="ic zapic"><use href="#i-zap"/></svg><span class="qlabel">'+esc(label)+'</span><button class="qx" data-del="'+t.id+'" aria-label="Remove quick add"><svg class="ic"><use href="#i-x"/></svg></button></span>';
   }).join('');
 }
@@ -1109,7 +1100,8 @@ function renderEntries(){
     /* v6: day header shows the day's CLOSING balance (items are newest-first, so [0] closes the day);
        per-row running balance moved to Entry Detail ("Balance after entry") + PDF exports. */
     var close=run[g.items[0].id];
-    return '<div class="day"><div class="dayhead"><h4>'+dayLabel(g.key)+'</h4><span class="dsub">'+nfmt(close)+'</span></div>'+
+    return '<div class="day"><div class="dayhead"><h4>'+dayLabel(g.key)+'</h4>'+
+      '<span class="dsub"><span class="dsublbl">Closing</span>'+nfmt(close)+'</span></div>'+
       '<div class="daycard">'+g.items.map(function(e){return entryRow(e);}).join('')+'</div></div>';
   }).join('');
   stagger(list);
@@ -1355,7 +1347,6 @@ function openEntrySheet(opts){
   $('#ent-note-err').classList.add('hidden');
   var when=(e&&!entDup)?new Date(e.ts):new Date();
   $('#ent-date').value=dateInputVal(when);
-  $('#ent-time').value=timeInputVal(when);
   $('#ent-note').value=e?(e.note||''):(t?(t.note||''):(opts.noteDefault||''));
   paintEntFlood();paintEntMode();renderEntSelects();renderNoteChips();paintAttach();
   openSheet('sheet-entry');
@@ -1419,7 +1410,7 @@ $('#ent-amount').addEventListener('input',function(){
   $('#ent-amount-err').classList.add('hidden');
   if(/[+\-*/()]/.test(s)){
     var v=calcEval(s);
-    $('#ent-calc').textContent=(v!==null&&v>0)?'= '+curSym()+' '+nfmt(Math.round(v*100)):'';
+    $('#ent-calc').textContent=(v!==null&&v>0)?'= '+nfmt(Math.round(v*100)):'';
   }else $('#ent-calc').textContent='';
 });
 $('#ent-note').addEventListener('input',function(){$('#ent-note-err').classList.add('hidden');});
@@ -1468,9 +1459,8 @@ function saveEntry(keepOpen){
   if(v.cents===null){$('#ent-amount-err').classList.remove('hidden');$('#ent-amount').focus();return;}
   if(!v.noteOk){$('#ent-note-err').classList.remove('hidden');$('#ent-note').focus();return;}
   if(!bookById(entBook)){toast('Pick a book first');return;}
-  var d=$('#ent-date').value,t=$('#ent-time').value,ts;
-  if(d){var dp=d.split('-'),tp=(t||'00:00').split(':');ts=new Date(+dp[0],+dp[1]-1,+dp[2],+tp[0]||0,+tp[1]||0).getTime();}
-  else ts=Date.now();
+  var prev=(entEditing&&!entDup)?entryById(entEditing):null;
+  var ts=tsFromDateInput($('#ent-date').value,prev?prev.ts:null);
   var note=$('#ent-note').value.trim(),msg,rollback=null;
   if(entEditing){
     var e=entryById(entEditing);if(!e)return;
@@ -1535,7 +1525,7 @@ function denomSet(){
 function openDenoms(forEntry){
   $('#dn-use').classList.toggle('hidden',!forEntry);
   $('#dn-list').innerHTML=denomSet().map(function(v){
-    return '<div class="dnrow"><span class="dl">'+esc(curSym())+' '+v+'</span><input type="number" inputmode="numeric" min="0" data-v="'+v+'" placeholder="0"><span class="da" data-a="'+v+'"></span></div>';
+    return '<div class="dnrow"><span class="dl">'+v+'</span><input type="number" inputmode="numeric" min="0" data-v="'+v+'" placeholder="0"><span class="da" data-a="'+v+'"></span></div>';
   }).join('');
   updateDenoms();
   openSheet('sheet-denoms');
@@ -1570,11 +1560,11 @@ function openDetail(id){
   var run=runningMap(e.bookId),balAfter=run[e.id];
   var rows='<div class="drow"><span>Category</span><b><span class="catdot" style="background:'+(c.color||hashColor(c.id))+';margin-right:7px"></span>'+esc(c.name)+'</b></div>'+
     drow('Paid via',(e.mode==='Cash'?'Cash in hand':'Bank account')+' ('+e.mode+')')+
-    drow('Date & time',fmtDate(e.ts)+' \u00B7 '+fmtTime(e.ts))+
+    drow('Date',fmtDate(e.ts))+
     drow('Book',b?b.name:'?')+
     (e.partyId&&partyById(e.partyId)?drow('Party',partyById(e.partyId).name):'')+
     (e.auto?drow('Posted by','Recurring rule'):'')+
-    (balAfter!==undefined?drow('Balance after entry',money(balAfter)):'');
+    (balAfter!==undefined?drow('Balance after entry',nfmt(balAfter)):'');
   $('#det-body').innerHTML='<div style="text-align:center"><span class="det-badge '+e.type+'">'+(e.type==='in'?'CASH IN':'CASH OUT')+'</span></div>'+
     '<div class="det-amt '+e.type+'">'+moneySigned(e.amount,e.type)+'</div>'+
     '<div class="det-words">'+esc(amtWords(e.amount))+'</div>'+
@@ -1621,7 +1611,7 @@ function webDownloadBlob(blob,filename){
   document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},400);
 }
 /* ============ in-app update check (direct APK channel only; Play updates itself) ============ */
-var APP_VERSION="6.2.1";
+var APP_VERSION="6.5.0";
 var UPDATE_URL="https://husainstudios.github.io/cashbook/version.json";
 function verCmp(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<3;i++){if((pa[i]||0)>(pb[i]||0))return 1;if((pa[i]||0)<(pb[i]||0))return -1;}return 0;}
 function checkForUpdate(){
@@ -1658,7 +1648,7 @@ function entryText(e){
   var lines=[(b?b.name:'Cashbook')+' \u2014 '+(e.type==='in'?'Cash in':'Cash out'),
     moneySigned(e.amount,e.type)+' ('+amtWords(e.amount)+')',
     (e.note?'Note: '+e.note:''),
-    c.name+' \u00B7 '+e.mode+' \u00B7 '+fmtDate(e.ts)+' '+fmtTime(e.ts)];
+    c.name+' \u00B7 '+e.mode+' \u00B7 '+fmtDate(e.ts)];
   if(e.partyId&&partyById(e.partyId))lines.push('Party: '+partyById(e.partyId).name);
   return lines.filter(Boolean).join('\n');
 }
@@ -1697,7 +1687,7 @@ function renderTrash(){
     var daysLeft=Math.max(0,Math.ceil((t.at+30*86400000-Date.now())/86400000));
     return '<div class="srow"><div class="eic" style="width:36px;height:36px;font-size:16px;border-radius:10px;background:'+c.color+'22;color:'+c.color+'"><span class="catdot big" style="background:'+c.color+'"></span></div>'+
       '<span class="sl">'+(e.note?esc(e.note):esc(c.name))+'<br><span style="font-size:12px;color:var(--faint)">'+esc(b?b.name:'?')+' \u00B7 '+fmtDate(e.ts)+' \u00B7 '+daysLeft+'d left</span></span>'+
-      '<span class="eamt '+e.type+'" style="font-size:13.5px">'+moneySigned(e.amount,e.type)+'</span>'+
+      '<span class="eamt '+e.type+'" style="font-size:13.5px">'+nfmtSigned(e.amount,e.type)+'</span>'+
       '<button class="iconbtn" data-restore="'+e.id+'" aria-label="Restore"><svg class="ic"><use href="#i-restore"/></svg></button>'+
       '<button class="iconbtn" data-kill="'+e.id+'" aria-label="Delete forever"><svg class="ic" style="color:var(--out)"><use href="#i-x"/></svg></button></div>';
   }).join('');
@@ -1731,13 +1721,6 @@ $('#row-trash').addEventListener('click',function(){renderTrash();goView('view-t
 
 /* ============ analytics: generic builders ============ */
 function sumIn(es,r){var tin=0,tout=0,n=0;es.forEach(function(e){if(e.ts>=r[0]&&e.ts<r[1]){n++;if(e.type==='in')tin+=e.amount;else tout+=e.amount;}});return{tin:tin,tout:tout,n:n};}
-function deltaHTML(cur,prev,goodUp){
-  if(!prev){return cur?'<span class="neu">new</span>':'<span class="neu">\u2014</span>';}
-  var pct=Math.round((cur-prev)/prev*100);
-  if(pct===0)return '<span class="neu">\u00B1 0% vs prev</span>';
-  var up=pct>0,good=up===goodUp;
-  return '<span class="'+(good?'up':'down')+'">'+(up?'\u25B2':'\u25BC')+' '+Math.abs(pct)+'% vs prev</span>';
-}
 function catAgg(es,type){
   var sums={},total=0;
   es.forEach(function(e){if(e.type!==type)return;sums[e.categoryId]=(sums[e.categoryId]||0)+e.amount;total+=e.amount;});
@@ -1759,22 +1742,12 @@ function donutHTML(es,type){
   });
   var svg='<svg viewBox="0 0 160 160" role="img" aria-label="Category breakdown">'+segs+
     '<text x="80" y="75" text-anchor="middle" style="font-size:9.5px;letter-spacing:.12em;fill:var(--muted)">'+(type==='out'?'SPENT':'RECEIVED')+'</text>'+
-    '<text x="80" y="93" text-anchor="middle" style="font-size:14px;font-weight:700;fill:var(--ink)">'+esc(curSym()+' '+compact(total))+'</text></svg>';
+    '<text x="80" y="93" text-anchor="middle" style="font-size:14px;font-weight:700;fill:var(--ink)">'+esc(compact(total))+'</text></svg>';
   var legend='<div class="legend">'+arr.map(function(s){
     var pct=Math.round(s.v/total*100);
-    return '<div class="lrow"><span class="sw" style="background:'+s.c.color+'"></span><span class="ln">'+esc(s.c.name)+'</span><span class="lv">'+money(s.v)+' \u00B7 '+pct+'%</span></div>';
+    return '<div class="lrow"><span class="sw" style="background:'+s.c.color+'"></span><span class="ln">'+esc(s.c.name)+'</span><span class="lv">'+nfmt(s.v)+' \u00B7 '+pct+'%</span></div>';
   }).join('')+'</div>';
   return '<div class="chart donutbox">'+svg+'</div>'+legend;
-}
-function modesHTML(es,type){
-  var sums={},total=0;
-  es.forEach(function(e){if(e.type!==type)return;sums[e.mode]=(sums[e.mode]||0)+e.amount;total+=e.amount;});
-  if(!total)return '<div class="chart-empty">No cash '+type+' in this period</div>';
-  return MODES.filter(function(m){return sums[m];}).map(function(m){
-    var v=sums[m],pct=Math.round(v/total*100);
-    var lbl=m==='Cash'?'Cash':'Bank';
-    return '<div class="mrow"><span class="mn"><span class="mdot '+(m==='Cash'?'cash':'bank')+'"></span>'+lbl+'</span><div class="mtrack"><div class="mfill" style="width:'+pct+'%;background:'+(m==='Cash'?'var(--in)':'#3E7CC4')+'"></div></div><span class="mv">'+money(v)+' \u00B7 '+pct+'%</span></div>';
-  }).join('');
 }
 function buildBuckets(r,p){
   var a=new Date(r[0]),b=new Date(r[1]);
@@ -1792,29 +1765,6 @@ function bucketData(es,bk){
     es.forEach(function(e){if(e.ts>=b.start&&e.ts<b.end){if(e.type==='in')tin+=e.amount;else tout+=e.amount;}});
     return{tin:tin,tout:tout,label:b.label};
   });
-}
-function barsHTML(es,r,p){
-  var data=bucketData(es,buildBuckets(r,p));
-  var max=0;data.forEach(function(d){max=Math.max(max,d.tin,d.tout);});
-  if(!max)return '<div class="chart-empty">Nothing in this period</div>';
-  var W=640,H=230,PL=8,PR=8,PT=16,PB=26,plotH=H-PT-PB,base=H-PB;
-  var cw=(W-PL-PR)/data.length,bw=Math.min(16,Math.max(2.5,cw*0.32)),s='';
-  [0,0.5,1].forEach(function(f){
-    var y=PT+(1-f)*plotH;
-    s+='<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="var(--line)" stroke-width="1"/>';
-    if(f>0)s+='<text x="'+(W-PR)+'" y="'+(y-5).toFixed(1)+'" text-anchor="end" style="font-size:10px;fill:var(--faint)">'+esc(compact(max*f))+'</text>';
-  });
-  var labelEvery=Math.max(1,Math.ceil(data.length/8));
-  data.forEach(function(d,i){
-    var cx=PL+cw*i+cw/2;
-    if(d.tin){var hIn=Math.max(d.tin/max*plotH,2);
-      s+='<rect x="'+(cx-bw-1).toFixed(1)+'" y="'+(base-hIn).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+hIn.toFixed(1)+'" rx="'+Math.min(3,bw/2).toFixed(1)+'" fill="var(--in)"/>';}
-    if(d.tout){var hOut=Math.max(d.tout/max*plotH,2);
-      s+='<rect x="'+(cx+1).toFixed(1)+'" y="'+(base-hOut).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+hOut.toFixed(1)+'" rx="'+Math.min(3,bw/2).toFixed(1)+'" fill="var(--out)"/>';}
-    if(i%labelEvery===0)s+='<text x="'+cx.toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" style="font-size:10px;fill:var(--faint)">'+esc(d.label)+'</text>';
-  });
-  return '<div class="chart"><svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="In versus out over time">'+s+'</svg></div>'+
-    '<div class="legend hleg"><span class="lrow"><span class="sw" style="background:var(--in)"></span>Cash in</span><span class="lrow"><span class="sw" style="background:var(--out)"></span>Cash out</span></div>';
 }
 function lineHTML(es,r,opening,p){
   var bk=buildBuckets(r,p);
@@ -1845,7 +1795,7 @@ function lineHTML(es,r,opening,p){
   s+='<path d="'+dArea+'" fill="var(--brand)" opacity="0.12"/>'+
     '<path d="'+dLine+'" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>'+
     '<circle cx="'+xAt(n).toFixed(1)+'" cy="'+yAt(endV).toFixed(1)+'" r="4.5" fill="var(--brand)"/>'+
-    '<text x="'+(W-PR-2)+'" y="'+Math.max(yAt(endV)-10,11).toFixed(1)+'" text-anchor="end" style="font-size:11px;font-weight:700;fill:var(--ink)">'+esc(curSym()+' '+compact(endV))+'</text>'+
+    '<text x="'+(W-PR-2)+'" y="'+Math.max(yAt(endV)-10,11).toFixed(1)+'" text-anchor="end" style="font-size:11px;font-weight:700;fill:var(--ink)">'+esc(compact(endV))+'</text>'+
     '<text x="'+PL+'" y="'+(H-7)+'" style="font-size:10px;fill:var(--faint)">'+esc(fmtDate(r[0]))+'</text>'+
     '<text x="'+(W-PR)+'" y="'+(H-7)+'" text-anchor="end" style="font-size:10px;fill:var(--faint)">'+esc(fmtDate(r[1]-1))+'</text>';
   return '<div class="chart"><svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Balance over time">'+s+'</svg></div>';
@@ -1862,25 +1812,6 @@ function insightsData(es,r){
   Object.keys(wk).forEach(function(k){if(wk[k]>bn){bn=wk[k];busiest=+k;}});
   return{days:days,tin:tin,tout:tout,bigIn:bigIn,bigOut:bigOut,busiest:busiest,bn:bn};
 }
-function insightsHTML(es,r){
-  if(!es.length)return '<div class="chart-empty">Nothing in this period</div>';
-  var d=insightsData(es,r);
-  var wd=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  var html='<div class="irow"><span>Average per day</span><b><span style="color:var(--in)">+'+nfmt(Math.round(d.tin/d.days))+'</span> \u00B7 <span style="color:var(--out)">\u2212'+nfmt(Math.round(d.tout/d.days))+'</span></b></div>';
-  if(d.bigIn)html+='<button class="irow" data-eid="'+d.bigIn.id+'"><span>Biggest cash in</span><b style="color:var(--in)">+'+nfmt(d.bigIn.amount)+' \u00B7 '+esc(d.bigIn.note||catById(d.bigIn.categoryId).name)+'</b></button>';
-  if(d.bigOut)html+='<button class="irow" data-eid="'+d.bigOut.id+'"><span>Biggest cash out</span><b style="color:var(--out)">\u2212'+nfmt(d.bigOut.amount)+' \u00B7 '+esc(d.bigOut.note||catById(d.bigOut.categoryId).name)+'</b></button>';
-  if(d.busiest!==null)html+='<div class="irow"><span>Busiest day</span><b>'+wd[d.busiest]+' \u00B7 '+d.bn+' entries</b></div>';
-  return html;
-}
-function budgetRowsHTML(buds,withBook){
-  return buds.map(function(x){
-    var pct=Math.round(x.pct*100),w=Math.min(100,pct);
-    var col=x.pct>=1?'var(--out)':(x.pct>=0.8?'var(--amber)':'var(--brand)');
-    var name=x.c.name+(withBook&&x.book?' \u00B7 '+x.book.name:'');
-    return '<div class="budrow"><div class="budtop"><span>'+esc(name)+'</span><b class="'+(x.pct>=1?'over':'')+'">'+nfmt(x.sp)+' / '+nfmt(x.b.amount)+' \u00B7 '+pct+'%</b></div>'+
-      '<div class="mtrack"><div class="mfill" style="width:'+w+'%;background:'+col+'"></div></div></div>';
-  }).join('');
-}
 
 /* ============ book analytics range (kept: PDF analytics export uses A + anRange) ============ */
 function anRange(){
@@ -1895,12 +1826,6 @@ var GA={p:'month',from:'',to:'',donut:'out',book:''};
 function gaRange(){
   if(GA.p==='custom'){var r=parseRangeInput(GA.from,GA.to);return r||presetRange('month');}
   return presetRange(GA.p);
-}
-function byBookData(r){
-  return S.books.map(function(b){
-    var t=sumIn(bookEntries(b.id),r);
-    return{book:b,tin:t.tin,tout:t.tout,net:t.tin-t.tout,n:t.n};
-  }).sort(function(a,b){return Math.abs(b.net)-Math.abs(a.net);});
 }
 /* v6 \u00ABPaper Ledger\u00BB analytics: IN/OUT/NET strip + Where-money-went donut + balance line,
    with a book-scope pill and a period pill (full period logic incl. custom kept). */
@@ -1918,10 +1843,10 @@ function renderGlobalAnalytics(){
   var es=pool.filter(function(e){return e.ts>=r[0]&&e.ts<r[1];}).sort(entrySortAsc);
   var tin=0,tout=0;
   es.forEach(function(e){if(e.type==='in')tin+=e.amount;else tout+=e.amount;});
-  $('#gkpi-in').textContent=money(tin);
-  $('#gkpi-out').textContent=money(tout);
+  $('#gkpi-in').textContent=nfmt(tin);
+  $('#gkpi-out').textContent=nfmt(tout);
   var net=tin-tout,kn=$('#gkpi-net');
-  kn.textContent=(net>0?'+ ':'')+money(net);
+  kn.textContent=(net>0?'+ ':'')+nfmt(net);
   kn.style.color=net>0?'var(--in)':(net<0?'var(--out)':'var(--ink)');
   $('#gdonut-wrap').innerHTML=donutHTML(es,'out');
   var opening=0;
@@ -1982,17 +1907,27 @@ function renderParties(){
   if(!S.parties.length){list.classList.add('hidden');list.innerHTML='';band.classList.add('hidden');empty.classList.remove('hidden');return;}
   empty.classList.add('hidden');list.classList.remove('hidden');band.classList.remove('hidden');
   var agg=partyAggregates();
-  $('#pp-collect').textContent=money(agg.toCollect);
-  $('#pp-pay').textContent=money(agg.toPay);
+  /* The net position is the headline of this tab — to receive MINUS to pay — so it is the
+     one balance here that carries the currency symbol (see the currency rule in CLAUDE.md);
+     the two component cards below it stay bare numbers. Positive means the money owed to him
+     outweighs what he owes: "Total receivable", green. Negative flips to "Total payable" and
+     red. Either way the figure shown is the absolute value — the word carries the direction,
+     never a minus sign, because "− 50,000 payable" reads like a double negative. */
+  var net=agg.toCollect-agg.toPay;
+  $('#pp-net-card').className='ppnet '+(net>0?'pos':(net<0?'neg':'zero'));
+  $('#pp-net-lbl').textContent=net>0?'Total receivable':(net<0?'Total payable':'All settled');
+  $('#pp-net').textContent=money(Math.abs(net));
+  $('#pp-collect').textContent=nfmt(agg.toCollect);
+  $('#pp-pay').textContent=nfmt(agg.toPay);
   var items=S.parties.slice().sort(function(a,b){return Math.abs(partyTotals(b.id).bal)-Math.abs(partyTotals(a.id).bal);});
   list.innerHTML=items.map(function(p){
-    var t=partyTotals(p.id),cls=t.bal>0?'pos':(t.bal<0?'neg':''),lbl=t.bal>0?'to collect':(t.bal<0?'to pay':'settled');
+    var t=partyTotals(p.id),cls=t.bal>0?'pos':(t.bal<0?'neg':''),lbl=t.bal>0?'to receive':(t.bal<0?'to pay':'settled');
     var es=partyEntries(p.id),last=0;es.forEach(function(e){if(e.ts>last)last=e.ts;});
     var sub=ROLE_LABEL[p.role]||'Customer';if(last)sub+=' · '+relTime(last);
     return '<button class="srow prow" data-pid="'+p.id+'">'+
       '<span class="avb circle" data-tone="'+avTone(p.id)+'">'+esc(initialsOf(p.name))+'</span>'+
       '<span class="sl"><span class="pnm">'+esc(p.name)+'</span><span class="psub">'+esc(sub)+'</span></span>'+
-      '<span class="pr-bal '+cls+'"><b>'+money(Math.abs(t.bal))+'</b><small>'+lbl+'</small></span></button>';
+      '<span class="pr-bal '+cls+'"><b>'+nfmt(Math.abs(t.bal))+'</b><small>'+lbl+'</small></span></button>';
   }).join('');
   stagger(list);
 }
@@ -2028,7 +1963,16 @@ function renderParty(){
     return '<div class="day"><div class="dayhead"><h4>'+dayLabel(g.key)+'</h4></div><div class="daycard">'+
       g.items.map(function(e){
         var b=bookById(e.bookId),bal=run[e.id];
-        var amtHtml='<div class="e2amt '+(e.type==='out'?'in':'out')+'">'+(e.type==='out'?'Gave ':'Got ')+nfmt(e.amount)+'</div>';
+        /* Same treatment as every other ledger: the qualifier is a small label, the number
+           carries the weight. Paid/Received replaces the +/- sign here rather than joining it.
+           The colour follows e.type directly, exactly like every other ledger in the app:
+           money you RECEIVED is green, money you PAID is red. It used to be inverted here
+           (green for what you gave) on khata logic — "they owe me now, that's good" — which
+           put the same entry in opposite colours depending on which screen you opened it
+           from. The party CARD balance still carries the khata meaning: To receive green,
+           To pay red. That distinction is deliberate; don't re-invert the rows to match it. */
+        var amtHtml='<div class="e2amt '+e.type+'"><span class="elbl">'+
+          (e.type==='out'?'Paid':'Received')+'</span><span class="enum">'+nfmt(e.amount)+'</span></div>';
         var balHtml='<div class="e2bal">'+(bal>=0?'Receive ':'Pay ')+nfmt(Math.abs(bal))+'</div>';
         return '<div class="erow"><button class="entry" data-pdid="'+e.id+'">'+
           entryCardInner(e,{bookName:b?b.name:'?',amtHtml:amtHtml,balHtml:balHtml})+
@@ -2149,7 +2093,7 @@ function renderRecurring(){
     var stat=r.paused?'Paused':(ended?'Ended':'Next '+fmtDate(r.nextTs));
     return '<div class="srow"><div class="eic" style="width:36px;height:36px;font-size:16px;border-radius:10px;background:'+c.color+'22;color:'+c.color+'"><span class="catdot big" style="background:'+c.color+'"></span></div>'+
       '<span class="sl">'+(r.note?esc(r.note):esc(c.name))+'<br><span style="font-size:12px;color:var(--faint)">'+fr[r.freq]+' \u00B7 '+stat+'</span></span>'+
-      '<span class="eamt '+r.type+'" style="font-size:13.5px">'+moneySigned(r.amount,r.type)+'</span>'+
+      '<span class="eamt '+r.type+'" style="font-size:13.5px">'+nfmtSigned(r.amount,r.type)+'</span>'+
       '<button class="iconbtn" data-toggle="'+r.id+'" aria-label="'+(r.paused?'Resume':'Pause')+'"><svg class="ic"><use href="#i-'+(r.paused?'play':'pause')+'"/></svg></button>'+
       '<button class="iconbtn" data-redit="'+r.id+'" aria-label="Edit"><svg class="ic"><use href="#i-edit"/></svg></button></div>';
   }).join('');
@@ -2181,7 +2125,6 @@ function openRecurSheet(id){
   $('#sr-amount').value=r?(r.amount/100):'';
   var when=r?new Date(r.nextTs):new Date();
   $('#sr-date').value=dateInputVal(when);
-  $('#sr-time').value=timeInputVal(when);
   $('#sr-end').value=r&&r.endTs?dateInputVal(r.endTs):'';
   $('#sr-note').value=r?(r.note||''):'';
   $('#sr-err').classList.add('hidden');
@@ -2202,8 +2145,13 @@ $('#sr-save').addEventListener('click',function(){
   var cents=parseAmt($('#sr-amount').value);
   var d=$('#sr-date').value,note=$('#sr-note').value.trim();
   if(cents===null||!d||!note){$('#sr-err').classList.remove('hidden');return;}
-  var dp=d.split('-'),tp=($('#sr-time').value||'09:00').split(':');
-  var nextTs=new Date(+dp[0],+dp[1]-1,+dp[2],+tp[0]||0,+tp[1]||0).getTime();
+  /* recurring posts at the START of its due day, not noon like a manual entry: runRecurring
+     fires on `nextTs<=now`, so midnight means the rule posts the first time the app is
+     opened that day. At noon he could open the app in the morning, not see the rent, add it
+     by hand, and get a duplicate when the rule fired in the afternoon. advanceTs carries the
+     time-of-day forward unchanged, so every future post keeps this too. */
+  var dp=d.split('-');
+  var nextTs=dayStartTs(+dp[0],+dp[1]-1,+dp[2]);
   var endTs;
   if($('#sr-end').value){var ep=$('#sr-end').value.split('-');endTs=new Date(+ep[0],+ep[1]-1,+ep[2],23,59).getTime();}
   if(srEditing){
@@ -2290,9 +2238,9 @@ function downloadFile(name,mime,content){
 function safeName(s){return String(s||'export').replace(/[^\w\u0600-\u06FF-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||'export';}
 function exportCSV(esAsc,baseName){
   if(!esAsc.length){toast('Nothing to export');return;}
-  var rows=[['Date','Time','Type','Amount','Category','Party','Payment mode','Note']];
+  var rows=[['Date','Type','Amount','Category','Party','Payment mode','Note']];
   esAsc.forEach(function(e){
-    rows.push([fmtDate(e.ts),fmtTime(e.ts),e.type==='in'?'Cash in':'Cash out',(e.amount/100),
+    rows.push([fmtDate(e.ts),e.type==='in'?'Cash in':'Cash out',(e.amount/100),
       catById(e.categoryId).name,e.partyId&&partyById(e.partyId)?partyById(e.partyId).name:'',e.mode,e.note||'']);
   });
   var csv='\uFEFF'+rows.map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
@@ -2301,10 +2249,10 @@ function exportCSV(esAsc,baseName){
 }
 function exportAllCSV(){
   if(!S.entries.length){toast('Nothing to export');return;}
-  var rows=[['Book','Date','Time','Type','Amount','Category','Party','Payment mode','Note']];
+  var rows=[['Book','Date','Type','Amount','Category','Party','Payment mode','Note']];
   S.entries.slice().sort(entrySortAsc).forEach(function(e){
     var b=bookById(e.bookId);
-    rows.push([b?b.name:'?',fmtDate(e.ts),fmtTime(e.ts),e.type==='in'?'Cash in':'Cash out',(e.amount/100),
+    rows.push([b?b.name:'?',fmtDate(e.ts),e.type==='in'?'Cash in':'Cash out',(e.amount/100),
       catById(e.categoryId).name,e.partyId&&partyById(e.partyId)?partyById(e.partyId).name:'',e.mode,e.note||'']);
   });
   var csv='\uFEFF'+rows.map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
@@ -2314,14 +2262,14 @@ function exportAllCSV(){
 function exportAccountCSV(acc){
   var mv=accMovements(acc);
   if(!mv.items.length){toast('Nothing to export');return;}
-  var rows=[['Date','Time','Type','Amount','Detail','Book','Party']];
+  var rows=[['Date','Type','Amount','Detail','Book','Party']];
   mv.items.forEach(function(it){
     if(it.kind==='t'){
       var x=it.ref;
-      rows.push([fmtDate(x.ts),fmtTime(x.ts),it.eff>0?'Transfer in':'Transfer out',(x.amount/100),x.note||'Transfer','','']);
+      rows.push([fmtDate(x.ts),it.eff>0?'Transfer in':'Transfer out',(x.amount/100),x.note||'Transfer','','']);
     }else{
       var e=it.ref,b=bookById(e.bookId);
-      rows.push([fmtDate(e.ts),fmtTime(e.ts),e.type==='in'?'Cash in':'Cash out',(e.amount/100),
+      rows.push([fmtDate(e.ts),e.type==='in'?'Cash in':'Cash out',(e.amount/100),
         e.note||catById(e.categoryId).name,b?b.name:'?',e.partyId&&partyById(e.partyId)?partyById(e.partyId).name:'']);
     }
   });
@@ -2417,13 +2365,11 @@ function fitCols(cols){
 }
 function renderPDF(EX){
   var pages=[],ops=null,y=0,M=36,W2=523,R2=M+W2;
-  /* ===== v5 «Ledger» PDF design language =====
-     Ocean Teal brand (#0B5C6B/#07414D) + cyan accent; in=green / out=red (money semantics).
-     Masthead + stat cards + borderless hairline tables + rounded totals band. */
   /* v6 «Paper Ledger» PDF identity: Indigo brand (#4C4AA8/#37357E) + violet accent (#7A6CDF);
      in=forest-green / out=terracotta (money semantics), warm-paper neutral tints. */
   var BRAND=[0.298,0.290,0.659],BRANDDK=[0.216,0.208,0.494],ACCENT=[0.478,0.424,0.874],INK=[0.149,0.141,0.125],MUT=[0.42,0.46,0.5],HAIR=[0.89,0.88,0.86];
-  var TONE={in:{t:[0.180,0.490,0.310],bg:[0.929,0.965,0.937]},out:{t:[0.753,0.333,0.251],bg:[0.980,0.933,0.914]},neu:{t:[0.20,0.19,0.17],bg:[0.960,0.949,0.925]}};
+  /* out tone tracks --out (#B04630) — see the note beside that token in styles.css */
+  var TONE={in:{t:[0.180,0.490,0.310],bg:[0.929,0.965,0.937]},out:{t:[0.690,0.275,0.188],bg:[0.980,0.933,0.914]},neu:{t:[0.20,0.19,0.17],bg:[0.960,0.949,0.925]}};
   function CF(c){return Array.isArray(c)?c[0]+' '+c[1]+' '+c[2]+' rg':(c||0)+' g';}
   function CS(c){return Array.isArray(c)?c[0]+' '+c[1]+' '+c[2]+' RG':(c||0)+' G';}
   function PWnew(){ops=[];pages.push(ops);y=(pages.length===1?104:52);}
@@ -2574,7 +2520,7 @@ var XP={m:'view',r:'month',from:'',to:''},XPscope='ledger',EXP=null;
 var PDF_TOGGLES={
   ledger:[['date','Date'],['note','Note'],['category','Category'],['party','Party'],['mode','Payment mode'],['amount','Amount'],['balance','Running balance']],
   account:[['date','Date'],['note','Detail'],['book','Book'],['amount','Amount'],['balance','Running balance']],
-  party:[['date','Date'],['note','Note'],['book','Book'],['amount','Gave / got'],['balance','Balance']],
+  party:[['date','Date'],['note','Note'],['book','Book'],['amount','Paid / received'],['balance','Balance']],
   analytics:[['summary','Summary'],['categories','By category'],['accounts','By account'],['time','Over time'],['insights','Insights'],['budgets','Budgets']]
 };
 function pdfScopeKey(scope){return scope.indexOf('analytics')===0?'analytics':scope;}
@@ -2686,7 +2632,7 @@ function buildExport(scope){
     if(p.date)cols3.push({k:'date',label:'Date',w:62});
     if(p.note)cols3.push({k:'note',label:'Detail',w:0,wrap:1,flex:1});
     if(p.book)cols3.push({k:'book',label:'Book',w:84});
-    if(p.amount){cols3.push({k:'gave',label:'You gave',w:66,align:'r',tone:'out'});cols3.push({k:'got',label:'You got',w:66,align:'r',tone:'in'});}
+    if(p.amount){cols3.push({k:'gave',label:'You paid',w:66,align:'r',tone:'out'});cols3.push({k:'got',label:'You received',w:66,align:'r',tone:'in'});}
     if(p.balance)cols3.push({k:'balance',label:'Balance',w:70,align:'r'});
     if(!cols3.length)return null;
     var rows3=es3.map(function(e){
@@ -2702,7 +2648,7 @@ function buildExport(scope){
       });
     });
     return{title:pt.name+(pt.phone?' - '+pt.phone:''),subtitle:'Party statement - as of '+fmtDate(Date.now()),fname:safeName(pt.name),
-      blocks:[{t:'tot',items:[['You gave',money(t3.gave),'out'],['You got',money(t3.got),'in'],[t3.bal>0?'To receive':(t3.bal<0?'To pay':'Settled'),money(Math.abs(t3.bal)),t3.bal>0?'in':(t3.bal<0?'out':'neu')]]},
+      blocks:[{t:'tot',items:[['You paid',money(t3.gave),'out'],['You received',money(t3.got),'in'],[t3.bal>0?'To receive':(t3.bal<0?'To pay':'Settled'),money(Math.abs(t3.bal)),t3.bal>0?'in':(t3.bal<0?'out':'neu')]]},
         {t:'tbl',cols:cols3,rows:rows3,foot:footRow(cols3,{gave:nfmt(t3.gave),got:nfmt(t3.got),balance:nfmt(t3.bal)})},
         {t:'note',s:'Positive balance means the party owes you. '+amtWords(Math.abs(t3.bal))+(t3.bal>0?' receivable.':(t3.bal<0?' payable.':''))+' All amounts in '+curSym()+'.'}]};
   }
@@ -3084,13 +3030,32 @@ $('#row-categories').addEventListener('click',function(){renderCats();goView('vi
 $('#btn-cat-back').addEventListener('click',function(){goBack('view-categories');});
 $('#btn-new-cat').addEventListener('click',function(){openCatSheet(null);});
 
-/* ============ share-image pipeline ============ */
-var FF='-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
-var IMG={bg:'#EEEBF7',ink:'#262420',mut:'#8D8776',line:'rgba(38,36,32,.08)',incol:'#2E7D4F',outcol:'#C05540'};
+/* ============ share images — 4:5 portrait, v6 «Paper Ledger» ============
+   These leave the app and land in WhatsApp, so they get the app's own visual language
+   rather than a generic white card: warm paper canvas, the indigo hero gradient, the day-card
+   surface, the same in/out colours, and Archivo (already loaded by the page, so canvas can
+   ask for it by name — CANVAS_FF falls back if it somehow is not there).
+
+   The frame is FIXED at 540x675 logical = 1080x1350 px, i.e. 4:5. That is the tallest
+   portrait ratio WhatsApp and Instagram show without cropping; the old card was content-sized
+   and came out roughly square, which got letterboxed and shrank the numbers. Content is laid
+   out from the top and the body card simply runs to the footer, so a short entry reads as a
+   receipt with breathing room rather than a stretched box. Anything that would overflow is
+   truncated on purpose — the app has the full record, the image is a summary. */
+var CANVAS_FF='Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+var FF=CANVAS_FF;
+/* tracks the light-theme tokens in styles.css — keep in sync with :root there */
+var IMG={bg:'#F6F2E8',card:'#FFFFFF',card2:'#FDFAF3',ink:'#262420',mut:'#736E5C',faint:'#A39D8C',
+  line:'rgba(38,36,32,.09)',rule:'#E5DDCC',brand:'#4C4AA8',brand2:'#413F96',brand3:'#7A6CDF',
+  incol:'#2E7D4F',outcol:'#B04630',noteBg:'#FBF3D9',noteBg2:'#F8EECB',noteInk:'#4A432E'};
+var IMG_W=540,IMG_H=675,HERO_H=286,PAD=30;
+var BODY_X=PAD,BODY_W=IMG_W-PAD*2,BODY_Y=HERO_H-34,BODY_B=IMG_H-52;
+
 function cardCanvas(h){
   var c=document.createElement('canvas');
-  c.width=1080;c.height=Math.round(h*2);
+  c.width=IMG_W*2;c.height=Math.round((h||IMG_H)*2);
   var x=c.getContext('2d');x.scale(2,2);
+  x.textBaseline='alphabetic';
   return{c:c,x:x};
 }
 function rr(x,px,py,w,h,r){
@@ -3102,7 +3067,18 @@ function rr(x,px,py,w,h,r){
   x.arcTo(px,py,px+w,py,r);
   x.closePath();
 }
-function measCtx(){return document.createElement('canvas').getContext('2d');}
+/* rounded only at the bottom — the hero band runs off the top edge like the app's header */
+function rrBottom(x,px,py,w,h,r){
+  x.beginPath();
+  x.moveTo(px,py);
+  x.lineTo(px+w,py);
+  x.lineTo(px+w,py+h-r);
+  x.arcTo(px+w,py+h,px+w-r,py+h,r);
+  x.lineTo(px+r,py+h);
+  x.arcTo(px,py+h,px,py+h-r,r);
+  x.closePath();
+}
+function measCtx(){var m=document.createElement('canvas').getContext('2d');m.textBaseline='alphabetic';return m;}
 function ellipsize(x,text,maxW){
   text=String(text||'');
   if(x.measureText(text).width<=maxW)return text;
@@ -3123,32 +3099,52 @@ function wrapLines(x,text,maxW,maxLines){
   }
   return lines;
 }
-function drawChrome(x,H){
-  x.fillStyle=IMG.bg;x.fillRect(0,0,540,H);
-  x.save();
-  x.shadowColor='rgba(38,36,32,.16)';x.shadowBlur=22;x.shadowOffsetY=9;
-  rr(x,16,16,508,H-32,22);x.fillStyle='#FFFFFF';x.fill();
-  x.restore();
-  rr(x,16,16,508,H-32,22);x.strokeStyle=IMG.line;x.lineWidth=1;x.stroke();
-  var g=x.createLinearGradient(34,32,34,62);
-  g.addColorStop(0,'#7A6CDF');g.addColorStop(1,'#413F96');
-  rr(x,34,32,30,30,9);x.fillStyle=g;x.fill();
-  x.strokeStyle='#FFFFFF';x.lineWidth=3.2;x.lineCap='round';x.lineJoin='round';
-  x.beginPath();x.moveTo(41.5,47.5);x.lineTo(47,53.5);x.lineTo(57,40.5);x.stroke();
-  x.fillStyle=IMG.ink;x.font='800 12px '+FF;x.textAlign='left';x.textBaseline='alphabetic';
-  x.fillText('C A S H B O O K',74,51.5);
-  x.fillStyle=IMG.mut;x.font='600 11px '+FF;x.textAlign='right';
-  x.fillText(fmtDate(Date.now()),506,51.5);
-  x.textAlign='left';
-  x.strokeStyle=IMG.line;x.lineWidth=1;
-  x.beginPath();x.moveTo(34,76);x.lineTo(506,76);x.stroke();
-  return 98;
+/* the Cashbook mark: the same rounded indigo tile + white tick the app uses */
+function drawMark(x,mx,my,size){
+  var r=size*0.3,g=x.createLinearGradient(mx,my,mx,my+size);
+  g.addColorStop(0,'#FFFFFF');g.addColorStop(1,'#E8E6FA');
+  rr(x,mx,my,size,size,r);x.fillStyle=g;x.fill();
+  x.strokeStyle=IMG.brand2;x.lineWidth=size*0.115;x.lineCap='round';x.lineJoin='round';
+  x.beginPath();
+  x.moveTo(mx+size*0.26,my+size*0.52);
+  x.lineTo(mx+size*0.44,my+size*0.71);
+  x.lineTo(mx+size*0.75,my+size*0.29);
+  x.stroke();
 }
-function drawFooter(x,H,label){
-  x.strokeStyle=IMG.line;x.lineWidth=1;
-  x.beginPath();x.moveTo(34,H-52);x.lineTo(506,H-52);x.stroke();
-  x.fillStyle=IMG.mut;x.font='500 10px '+FF;x.textAlign='center';
-  x.fillText(label||'Generated by Cashbook \u00B7 data stays on this device',270,H-33);
+/* hero band: indigo gradient, wordmark, date. Returns the y baseline content starts at. */
+function drawHero(x){
+  x.fillStyle=IMG.bg;x.fillRect(0,0,IMG_W,IMG_H);
+  var g=x.createLinearGradient(0,0,IMG_W,HERO_H);
+  g.addColorStop(0,'#413F96');g.addColorStop(0.48,'#5654BE');g.addColorStop(1,'#7A6CDF');
+  rrBottom(x,0,0,IMG_W,HERO_H,30);x.fillStyle=g;x.fill();
+  drawMark(x,PAD,38,26);
+  x.fillStyle='#FFFFFF';x.font='800 12.5px '+FF;x.textAlign='left';
+  x.fillText('C A S H B O O K',PAD+36,56);
+  x.fillStyle='rgba(255,255,255,.72)';x.font='600 11.5px '+FF;x.textAlign='right';
+  x.fillText(fmtDate(Date.now()),IMG_W-PAD,56);
+  x.textAlign='left';
+  return 96;
+}
+/* The body surface — the app's day card, lifted over the hero. Height is passed in, not
+   assumed: each builder measures its content first so the card hugs it. A fixed full-height
+   card left a slab of empty white under a short entry, which read like a rendering bug
+   rather than a receipt. Clamped so it can never run past the footer. */
+function drawBody(x,h){
+  h=Math.min(h,BODY_B-BODY_Y);
+  x.save();
+  x.shadowColor='rgba(38,36,32,.20)';x.shadowBlur=26;x.shadowOffsetY=10;
+  rr(x,BODY_X,BODY_Y,BODY_W,h,22);
+  var g=x.createLinearGradient(0,BODY_Y,0,BODY_Y+h);
+  g.addColorStop(0,IMG.card);g.addColorStop(1,IMG.card2);
+  x.fillStyle=g;x.fill();
+  x.restore();
+  rr(x,BODY_X,BODY_Y,BODY_W,h,22);
+  x.strokeStyle=IMG.line;x.lineWidth=1;x.stroke();
+  return h;
+}
+function drawFooter(x,label){
+  x.fillStyle=IMG.faint;x.font='500 10.5px '+FF;x.textAlign='center';
+  x.fillText(label||'Generated by Cashbook \u00B7 data stays on this device',IMG_W/2,IMG_H-24);
   x.textAlign='left';
 }
 function shareCanvas(canvas,filename,title){
@@ -3173,92 +3169,148 @@ function shareCanvas(canvas,filename,title){
   },'image/png');
 }
 function buildEntryCard(e){
-  var m=measCtx();m.font='700 18px '+FF;
-  var noteLines=e.note?wrapLines(m,e.note,440,3):[];
-  var rows=[['Category',catById(e.categoryId).emoji+' '+catById(e.categoryId).name],
-    ['Account',(e.mode==='Cash'?'Cash in hand':'Bank account')+' ('+e.mode+')'],
-    ['Date',fmtDate(e.ts)+' \u00B7 '+fmtTime(e.ts)],
+  var cc=cardCanvas(IMG_H),x=cc.x;
+  var y=drawHero(x);
+  var isIn=e.type==='in';
+
+  /* --- hero: the label pill, then the amount, then the amount in words --- */
+  x.textAlign='center';
+  var lbl=isIn?'CASH IN':'CASH OUT';
+  x.font='800 11px '+FF;
+  var bw=x.measureText(lbl).width+28;
+  rr(x,IMG_W/2-bw/2,y+22,bw,23,11.5);
+  x.fillStyle='rgba(255,255,255,.18)';x.fill();
+  x.fillStyle='#FFFFFF';x.fillText(lbl,IMG_W/2,y+38);
+
+  x.font='800 46px '+FF;x.fillStyle='#FFFFFF';
+  x.fillText((isIn?'+ ':'\u2212 ')+curSym()+' '+nfmt(e.amount),IMG_W/2,y+96);
+
+  x.font='500 11.5px '+FF;x.fillStyle='rgba(255,255,255,.75)';
+  x.fillText(ellipsize(x,amtWords(e.amount),BODY_W-40),IMG_W/2,y+120);
+  x.textAlign='left';
+
+  /* --- measure before drawing, so the card can hug its content --- */
+  var m=measCtx();m.font='700 17px '+CANVAS_FF;
+  var noteLines=e.note?wrapLines(m,e.note,BODY_W-72,3):[];
+  var rows=[['Category',catById(e.categoryId).name],
+    ['Payment mode',(e.mode==='Cash'?'Cash in hand':'Bank account')+' ('+e.mode+')'],
+    ['Date',fmtDate(e.ts)],
     ['Book',bookById(e.bookId)?bookById(e.bookId).name:'?']];
   if(e.partyId&&partyById(e.partyId))rows.push(['Party',partyById(e.partyId).name]);
-  if(e.attach)rows.push(['Photo','Attached (in app)']);
-  var H=98+30+50+22+(noteLines.length?noteLines.length*25+8:14)+12+rows.length*29+18+60;
-  var cc=cardCanvas(H),x=cc.x,y=drawChrome(x,H);
-  var col=e.type==='in'?IMG.incol:IMG.outcol;
-  x.textAlign='center';
-  x.font='800 11px '+FF;
-  var lbl=e.type==='in'?'CASH IN':'CASH OUT';
-  var bw=x.measureText(lbl).width+30;
-  rr(x,270-bw/2,y-4,bw,22,11);
-  x.fillStyle=e.type==='in'?'rgba(17,138,87,.12)':'rgba(214,69,96,.12)';x.fill();
-  x.fillStyle=col;
-  x.fillText(lbl,270,y+11);
-  y+=30;
-  x.font='750 38px '+FF;
-  x.fillText((e.type==='in'?'+ ':'\u2212 ')+curSym()+' '+nfmt(e.amount),270,y+34);
-  y+=50;
-  x.fillStyle=IMG.mut;x.font='500 11px '+FF;
-  x.fillText(ellipsize(x,amtWords(e.amount),440),270,y+12);
-  y+=22;
+  if(e.attach)rows.push(['Photo','Attached — open in the app']);
+  var ROWH=32;
+  var noteBlock=noteLines.length?(noteLines.length*24+26+22):0;
+  drawBody(x,28+noteBlock+(rows.length-1)*ROWH+22);
+
+  var by=BODY_Y+28;
   if(noteLines.length){
-    x.fillStyle=IMG.ink;x.font='700 18px '+FF;
-    noteLines.forEach(function(ln){y+=25;x.fillText(ln,270,y);});
-    y+=8;
-  }else y+=14;
-  x.textAlign='left';
-  x.strokeStyle=IMG.line;x.beginPath();x.moveTo(44,y);x.lineTo(496,y);x.stroke();
-  y+=10;
-  rows.forEach(function(rw){
-    y+=29;
+    var nh=noteLines.length*24+26;
+    var ng=x.createLinearGradient(0,by,0,by+nh);
+    ng.addColorStop(0,IMG.noteBg);ng.addColorStop(1,IMG.noteBg2);
+    rr(x,BODY_X+18,by,BODY_W-36,nh,13);x.fillStyle=ng;x.fill();
+    x.fillStyle=IMG.noteInk;x.font='700 17px '+FF;x.textAlign='center';
+    var ny=by+24;
+    noteLines.forEach(function(ln){x.fillText(ln,IMG_W/2,ny);ny+=24;});
+    x.textAlign='left';
+    by+=nh+22;
+  }
+
+  /* --- detail rows, the app's form-row rhythm --- */
+  var LX=BODY_X+22,RX=BODY_X+BODY_W-22;
+  rows.forEach(function(rw,idx){
+    if(idx){
+      x.strokeStyle=IMG.rule;x.lineWidth=1;
+      x.beginPath();x.moveTo(LX,by-16);x.lineTo(RX,by-16);x.stroke();
+    }
     x.fillStyle=IMG.mut;x.font='600 12.5px '+FF;x.textAlign='left';
-    x.fillText(rw[0],44,y);
+    x.fillText(rw[0],LX,by);
     x.fillStyle=IMG.ink;x.font='650 13.5px '+FF;x.textAlign='right';
-    x.fillText(ellipsize(x,rw[1],330),496,y);
+    x.fillText(ellipsize(x,rw[1],BODY_W-190),RX,by);
+    by+=32;
   });
   x.textAlign='left';
-  drawFooter(x,H);
+  drawFooter(x);
   return cc.c;
 }
 function buildPartyCard(pid){
   var p=partyById(pid);if(!p)return null;
   var t=partyTotals(pid);
-  var es=partyEntries(pid).sort(function(a,b){return -entrySortAsc(a,b);});
-  var shown=es.slice(0,12),more=es.length-shown.length;
-  var H=98+30+(p.phone?18:0)+16+16+40+24+18+shown.length*27+(more>0?22:0)+(shown.length?0:24)+60;
-  var cc=cardCanvas(H),x=cc.x,y=drawChrome(x,H);
-  x.fillStyle=IMG.ink;x.font='750 21px '+FF;
-  x.fillText(ellipsize(x,p.name,440),44,y+20);y+=30;
-  if(p.phone){x.fillStyle=IMG.mut;x.font='550 12px '+FF;x.fillText(p.phone,44,y+10);y+=18;}
-  y+=16;
-  var lbl=t.bal>0?'TO RECEIVE':(t.bal<0?'TO PAY':'SETTLED');
-  var col=t.bal>0?IMG.incol:(t.bal<0?IMG.outcol:IMG.mut);
-  x.fillStyle=col;x.font='800 11px '+FF;
-  x.fillText(lbl,44,y+10);y+=16;
-  x.font='750 33px '+FF;
-  x.fillText(curSym()+' '+nfmt(Math.abs(t.bal)),44,y+30);y+=40;
-  x.fillStyle=IMG.mut;x.font='550 12.5px '+FF;
-  x.fillText('You gave '+nfmt(t.gave)+'   \u00B7   You got '+nfmt(t.got),44,y+14);y+=24;
-  x.strokeStyle=IMG.line;x.beginPath();x.moveTo(44,y+6);x.lineTo(496,y+6);x.stroke();y+=18;
-  if(!shown.length){
-    x.fillStyle=IMG.mut;x.font='500 12px '+FF;
-    x.fillText('No entries yet.',44,y+10);y+=24;
+  var cc=cardCanvas(IMG_H),x=cc.x;
+  var y=drawHero(x);
+
+  /* --- hero: who, then what the balance means, then the number --- */
+  x.textAlign='center';
+  x.fillStyle='#FFFFFF';x.font='750 20px '+FF;
+  x.fillText(ellipsize(x,p.name,BODY_W-40),IMG_W/2,y+18);
+  if(p.phone){
+    x.fillStyle='rgba(255,255,255,.7)';x.font='550 12px '+FF;
+    x.fillText(p.phone,IMG_W/2,y+38);
   }
-  shown.forEach(function(e){
-    y+=27;
-    x.fillStyle=IMG.mut;x.font='550 10.5px '+FF;x.textAlign='left';
-    x.fillText(fmtDate(e.ts),44,y);
-    x.fillStyle=IMG.ink;x.font='600 12.5px '+FF;
-    x.fillText(ellipsize(x,e.note||catById(e.categoryId).name,235),118,y);
-    x.fillStyle=e.type==='out'?IMG.incol:IMG.outcol;
-    x.font='700 12.5px '+FF;x.textAlign='right';
-    x.fillText((e.type==='out'?'Gave ':'Got ')+nfmt(e.amount),496,y);
+  var hy=y+(p.phone?62:48);
+  /* bal>0 means they owe you. To receive / To pay keep their khata colours — but on the
+     indigo hero everything is white, so the WORD carries the meaning, not a tint. */
+  var lbl=t.bal>0?'TO RECEIVE':(t.bal<0?'TO PAY':'SETTLED');
+  x.font='800 11px '+FF;
+  var bw=x.measureText(lbl).width+28;
+  rr(x,IMG_W/2-bw/2,hy-16,bw,23,11.5);
+  x.fillStyle='rgba(255,255,255,.18)';x.fill();
+  x.fillStyle='#FFFFFF';x.fillText(lbl,IMG_W/2,hy);
+
+  x.font='800 40px '+FF;x.fillStyle='#FFFFFF';
+  x.fillText(curSym()+' '+nfmt(Math.abs(t.bal)),IMG_W/2,hy+48);
+
+  x.font='550 12px '+FF;x.fillStyle='rgba(255,255,255,.75)';
+  x.fillText('You paid '+nfmt(t.gave)+'   \u00B7   You received '+nfmt(t.got),IMG_W/2,hy+70);
+  x.textAlign='left';
+
+  /* --- measure, then draw the card to fit --- */
+  var LX=BODY_X+20,RX=BODY_X+BODY_W-20;
+  var es=partyEntries(pid).sort(function(a,b){return -entrySortAsc(a,b);});
+  /* Each row is a fixed ROW-tall block laid out from its own top, so the separator can
+     never land on the date line — which is what it did when offsets were measured from a
+     baseline instead. Two lines on the left (note, then date), one amount on the right. */
+  var ROW=38,HEADH=26+18;
+  var room=Math.floor((BODY_B-BODY_Y-HEADH-24)/ROW);
+  var shown=es.slice(0,Math.max(0,room-(es.length>room?1:0)));
+  var more=es.length-shown.length;
+  drawBody(x,HEADH+(shown.length?shown.length*ROW:24)+(more>0?24:0)+18);
+
+  var by=BODY_Y+26;
+  x.fillStyle=IMG.mut;x.font='700 10.5px '+FF;x.textAlign='left';
+  x.fillText('S T A T E M E N T',LX,by);
+  x.textAlign='right';
+  x.fillStyle=IMG.faint;x.font='600 10.5px '+FF;
+  x.fillText(es.length+(es.length===1?' entry':' entries'),RX,by);
+  x.textAlign='left';
+  by+=18;
+
+  if(!es.length){
+    x.fillStyle=IMG.faint;x.font='500 12.5px '+FF;
+    x.fillText('No entries yet.',LX,by+18);
+  }
+  shown.forEach(function(e,idx){
+    var top=by+idx*ROW;
+    if(idx){
+      x.strokeStyle=IMG.rule;x.lineWidth=1;
+      x.beginPath();x.moveTo(LX,top);x.lineTo(RX,top);x.stroke();
+    }
+    x.fillStyle=IMG.ink;x.font='650 13px '+FF;x.textAlign='left';
+    x.fillText(ellipsize(x,e.note||catById(e.categoryId).name,BODY_W-215),LX,top+17);
+    x.fillStyle=IMG.faint;x.font='500 10.5px '+FF;
+    x.fillText(fmtDate(e.ts),LX,top+31);
+    /* colour follows the entry type, same as the ledger: received green, paid red */
+    x.fillStyle=e.type==='in'?IMG.incol:IMG.outcol;
+    x.font='750 14px '+FF;x.textAlign='right';
+    x.fillText((e.type==='out'?'Paid ':'Received ')+nfmt(e.amount),RX,top+22);
     x.textAlign='left';
   });
+  by+=shown.length*ROW;
   if(more>0){
-    y+=22;
-    x.fillStyle=IMG.mut;x.font='550 11px '+FF;
-    x.fillText('+ '+more+' earlier '+(more===1?'entry':'entries')+' \u2014 full statement in the app',44,y);
+    by+=24;
+    x.fillStyle=IMG.faint;x.font='550 11px '+FF;
+    x.fillText('+ '+more+' earlier '+(more===1?'entry':'entries')+' \u2014 full statement in the app',LX,by);
   }
-  drawFooter(x,H);
+  drawFooter(x);
   return cc.c;
 }
 
